@@ -13,6 +13,7 @@
 #include "ui.h"
 #include "../../../include/battle/tag_hud_data.h"
 #include "../../../include/battle/tag_options.h"
+#include "../../../include/battle/tag_controls.h"
 #include "tag_hud_marker.h"
 #include "tag_net.h"
 #include "../../include/tag_text.h"
@@ -131,8 +132,8 @@ bool TagHud_Visible() {
     return active || (option>=0 && has_preview(option) && SDL_GetTicks()-previewTime.load()<150);
 }
 static bool tag_combo(const char *label,int *value,const char *items) {
-    const char *translated[8];int count=0;
-    while(*items && count<8){translated[count++]=Port_TagText(items);items+=strlen(items)+1;}
+    const char *translated[16];int count=0;
+    while(*items && count<16){translated[count++]=Port_TagText(items);items+=strlen(items)+1;}
     return ImGui::Combo(label,value,translated,count);
 }
 void TagHud_Settings() {
@@ -153,10 +154,20 @@ void TagHud_Settings() {
                 changed=ImGui::SliderFloat(o.label,&seconds,0,3,Port_TagText("%.1f seconds"));
                 value=(int)std::round(seconds*10);
             }
+            else if(i==TAG_OPT_TARGET_BUTTON || i==TAG_OPT_LOCKOFF_BUTTON) changed=tag_combo(o.label,&value,"Select\0L3\0R3\0Start\0Up\0Right\0Down\0Left\0L2\0R2\0L1\0R1\0Triangle\0Circle\0Cross\0Square\0");
+            else if(i==TAG_OPT_MENU_BUTTON) changed=tag_combo(o.label,&value,"Select\0L3\0R3\0Start\0L2\0R2\0L1\0R1\0Square\0");
+            else if(i==TAG_OPT_TARGET_HOLD || i==TAG_OPT_LOCKOFF_HOLD) {
+                float seconds=value/100.0f;
+                changed=ImGui::SliderFloat(o.label,&seconds,0,10,Port_TagText("%.2f seconds"));
+                value=(int)std::round(seconds*100);
+            }
+            else if(i==TAG_OPT_TARGET_ORDER) changed=tag_combo(o.label,&value,"Left to right\0Nearest first\0Selection order\0");
+            else if(i==TAG_OPT_TARGET_ATTACKER) changed=tag_combo(o.label,&value,"Never\0Press during warning\0When hit\0");
+            else if(i==TAG_OPT_TARGET_AFTER_KO) changed=tag_combo(o.label,&value,"Nearest camera centre\0Game default\0");
             else if(o.max==1) { bool on=value!=0; changed=ImGui::Checkbox(o.label,&on); value=on; }
             else if(i==TAG_OPT_UNLOCKED_HUD) changed=tag_combo(o.label,&value,"Show\0Only with one enemy\0Hide\0");
             else if(i==TAG_OPT_TARGET_STYLE) changed=tag_combo(o.label,&value,"Arrow\0Ring\0Corner reticle\0Arrow and ring\0");
-            else if(i==TAG_OPT_TARGET_STICK) changed=tag_combo(o.label,&value,"Off\0Hold L3 and flick\0Flick alone\0");
+            else if(i==TAG_OPT_TARGET_STICK) changed=tag_combo(o.label,&value,"Off\0Hold target button and flick\0Flick alone\0");
             else if(i==TAG_OPT_OUTNUMBERED) changed=tag_combo(o.label,&value,"Off\0Balanced\0Strong\0Custom\0");
             else changed=ImGui::SliderInt(o.label,&value,o.min,o.max);
             if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",o.help);
@@ -171,14 +182,20 @@ void TagHud_Settings() {
         }
         ImGui::TreePop();
     }
-    ImGui::TextWrapped("%s",Port_TagText("Tap L3 to target an attacker; otherwise select an enemy near the centre of your view. Hold for half a second to unlock. Right-stick targeting follows the direction on your screen. F1 > Controls edits each player's bindings; Controller Setup assigns devices to players."));
+    ImGui::TextWrapped("%s",Port_TagText("Choose targeting and menu buttons here. F1 > Controls binds those buttons to keys or gamepad inputs for each player. Controller Setup assigns devices to players. Target and lock-off buttons replace their normal battle actions."));
 }
 extern "C" void Port_TagOptionFormat(int id,int v,unsigned output,int size) {
     if(id<0||id>=TAG_OPT_COUNT||size<1)return;
     char *p=(char *)(uintptr_t)output;
     const char *label=nullptr;
     switch(id) {
-    case TAG_OPT_TARGET_STICK:{static const char *s[]={"Off","Hold L3 and flick","Flick the right stick"};label=s[v];break;}
+    case TAG_OPT_TARGET_BUTTON:case TAG_OPT_LOCKOFF_BUTTON:label=TagControl_Name(v);break;
+    case TAG_OPT_MENU_BUTTON:label=TagControl_Name(TagControl_MenuButton(v));break;
+    case TAG_OPT_TARGET_HOLD:case TAG_OPT_LOCKOFF_HOLD:snprintf(p,size,Port_TagText("%d.%02d seconds"),v/100,v%100);return;
+    case TAG_OPT_TARGET_ORDER:{static const char *s[]={"Left to right","Nearest first","Selection order"};label=s[v];break;}
+    case TAG_OPT_TARGET_ATTACKER:{static const char *s[]={"Never","Press during warning","When hit"};label=s[v];break;}
+    case TAG_OPT_TARGET_AFTER_KO:label=v?"Game default":"Nearest camera centre";break;
+    case TAG_OPT_TARGET_STICK:{static const char *s[]={"Off","Hold target button and flick","Flick the right stick"};label=s[v];break;}
     case TAG_OPT_TARGET_STYLE:{static const char *s[]={"Arrow","Ring","Corner reticle","Arrow and ring"};label=s[v];break;}
     case TAG_OPT_OUTNUMBERED:{static const char *s[]={"Off","Balanced","Strong","Custom"};label=s[v];break;}
     case TAG_OPT_OUT_SCOPE:label=v?"Smaller team or 2+ attackers":"Smaller team";break;
@@ -554,8 +571,10 @@ void TagHud_Draw() {
                 "R3 - beam assist (1 stock)",end.x-begin.x-2*margin);
         }
         if(view.spectating && !onlineObserver && Port_TagOption(TAG_OPT_SPECTATOR_HINTS)) {
+            char spectatorHint[160];
+            snprintf(spectatorHint,sizeof(spectatorHint),Port_TagText(view.takeover>=0?"%s - change view   Square - take over teammate":"%s - change spectator view"),TagControl_Name(Port_TagOption(TAG_OPT_TARGET_BUTTON)));
             text(d,begin.x+margin,end.y-24*sc,9*sc,IM_COL32(255,220,120,255),
-                view.takeover>=0?"L3 - change view   Square - take over teammate":"L3 - change spectator view",end.x-begin.x-2*margin);
+                spectatorHint,end.x-begin.x-2*margin);
         }
         d->PopClipRect();
     }

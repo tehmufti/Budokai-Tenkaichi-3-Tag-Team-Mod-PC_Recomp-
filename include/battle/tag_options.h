@@ -3,7 +3,7 @@
 /* One catalogue for the native menu, F1 window, persistence and range checks.
    Keep existing IDs stable when adding options. */
 #define TAG_OPTION_GROUPS(X) \
- X("Revival") X("Combat") X("Cinematics") X("Targeting and Views") X("HUD") X("Controllers") X("Training") X("Fusion") X("Outnumbered") X("Giants") X("Stages") X("HUD Text")
+ X("Revival") X("Combat") X("Cinematics") X("Targeting and Views") X("HUD") X("Controllers") X("Training") X("Fusion") X("Outnumbered") X("Giants") X("Stages") X("HUD Text") X("Controls")
 #define TAG_OPTION_LIST(X) \
  X(REVIVE,"tag_revive","Revive Teammates",0,0,1,1,1,"Stay near a fallen teammate. Movement and blocking are allowed.") \
  X(REVIVE_SECONDS,"tag_revive_seconds","Revival Time",0,1,15,1,3,"Seconds spent inside the revival ring.") \
@@ -56,10 +56,10 @@
  X(GIANT_DAMAGE,"tag_giant_damage","Giant Melee Damage",9,100,500,25,150,"Percent of ordinary melee damage while larger giants are enabled.") \
  X(GIANT_ARMOR,"tag_giant_armor","Giant Armor",9,0,5,1,1,"Extra stagger resistance. Damage and armor-breaking moves still work.") \
  X(GIANT_CAMERA,"tag_giant_camera","Giant Camera Distance",9,100,250,10,150,"Extra distance for normal follow cameras; cinematic cameras stay unchanged.") \
- X(SPECTATE_FALLEN,"tag_spectate_fallen","Watch Fallen Fighters",3,0,1,1,1,"Include defeated fighters when L3 switches the spectator camera.") \
+ X(SPECTATE_FALLEN,"tag_spectate_fallen","Watch Fallen Fighters",3,0,1,1,1,"Include defeated fighters when the target button switches the spectator camera.") \
  X(SPECTATOR_HINTS,"tag_spectator_hints","Spectator Hints",11,0,1,1,1,"Show camera switching and teammate takeover controls while spectating.") \
  X(TARGET_STYLE,"tag_target_style","Target Marker Look",3,0,3,1,0,"Choose an arrow, a ring, a corner reticle, or arrow and ring.") \
- X(TARGET_STICK,"tag_target_stick","Right Stick Targeting",3,0,2,1,2,"Off, hold L3 and flick, or flick alone. Locked off, the stick still moves the camera.") \
+ X(TARGET_STICK,"tag_target_stick","Right Stick Targeting",12,0,2,1,2,"Off, hold the target button and flick, or flick alone. Locked off, the stick still moves the camera.") \
  X(ATTACK_WARNING,"tag_attack_warning","Enemy Attack Indicators",4,0,1,1,0,"Red pointers mark enemies targeting you and flash when they attack.") \
  X(STYLED_HUD,"tag_styled_hud","Styled Battle Indicators",4,0,1,1,1,"Use the mod's beveled health, revival and fusion meters and gold target arrow.") \
  X(OUTNUMBERED,"tag_outnumbered","Outnumbered Assistance",8,0,3,1,0,"Off, Balanced, Strong, or Custom. Help fighters on the smaller living team.") \
@@ -95,7 +95,17 @@
  X(PRACTICE_RECOVERY_TEXT,"tag_practice_recovery_text","Practice Recovery Countdown",11,0,1,1,1,"Show the countdown before getting up again in practice.") \
  X(WAVE_TITLE_TEXT,"tag_wave_title_text","Gauntlet Wave Titles",11,0,1,1,1,"Show the title when a new gauntlet wave begins.") \
  X(ROUND_END_TEXT,"tag_round_end_text","Gauntlet Round End Text",11,0,1,1,1,"Show the round-over message between gauntlet waves.") \
- X(CORPSE_SAFETY,"tag_corpse_safety","Keep Fallen Fighters in Bounds",0,0,1,1,1,"Catch KO'd fighters at the lower stage boundary so teammates can reach them. Ring-outs remain permanent.")
+ X(CORPSE_SAFETY,"tag_corpse_safety","Keep Fallen Fighters in Bounds",0,0,1,1,1,"Catch KO'd fighters at the lower stage boundary so teammates can reach them. Ring-outs remain permanent.") \
+ X(TARGET_BUTTON,"tag_target_button","Target Button",12,0,15,1,1,"Change target and cycle spectator views. Uses your keyboard or controller binding for this button.") \
+ X(TARGET_HOLD,"tag_target_hold","Target Button Hold Time",12,0,1000,25,0,"How long to hold before switching targets. Zero is a tap. With a shared lock-off button, release to switch.") \
+ X(LOCKOFF,"tag_lockoff","Allow Lock Off",12,0,1,1,1,"Allow free flight without a target. Locking on again selects the enemy nearest the centre of your camera.") \
+ X(LOCKOFF_BUTTON,"tag_lockoff_button","Lock Off Button",12,0,15,1,1,"Use the target button with a longer hold, or choose a separate button.") \
+ X(LOCKOFF_HOLD,"tag_lockoff_hold","Lock Off Hold Time",12,0,1000,25,50,"How long to hold before unlocking. A shared button always gives you time to release for a target switch.") \
+ X(TARGET_ORDER,"tag_target_order","Target Switch Order",12,0,2,1,0,"Cycle targets from left to right on screen, nearest first, or in character selection order.") \
+ X(TARGET_ATTACKER,"tag_target_attacker","Target Incoming Attacker",12,0,2,1,1,"Never, on a target-button press during an attack warning, or automatically after taking damage.") \
+ X(TARGET_AFTER_KO,"tag_target_after_ko","Target After a KO",12,0,1,1,0,"Choose the enemy nearest the centre of your camera, or use the normal next-target order.") \
+ X(MENU_BUTTON,"tag_menu_button","Mod Menu Button",12,0,8,1,0,"Button that opens or closes the modded mode list from the main menu.") \
+ X(MENU_HINT,"tag_menu_hint","Show Mod Menu Hint",12,0,1,1,1,"Show the mod menu button on the main menu.")
 #define TAG_OPTION_ENUM(id,key,label,group,min,max,step,def,help) TAG_OPT_##id,
 enum {
     TAG_OPTION_LIST(TAG_OPTION_ENUM)
@@ -112,7 +122,7 @@ static const TagOptionInfo tagOptionInfo[TAG_OPT_COUNT]={TAG_OPTION_LIST(TAG_OPT
 #define TAG_GROUP_NAME(name) name,
 static const char *tagOptionGroups[]={TAG_OPTION_GROUPS(TAG_GROUP_NAME)};
 #undef TAG_GROUP_NAME
-#define TAG_OPTION_GROUP_COUNT 12
+#define TAG_OPTION_GROUP_COUNT 13
 /* These switches only draw information. In a room they stay local; gameplay
    and cinematic rules still come from the host. Keep this explicit so adding
    a gameplay setting to the HUD category cannot accidentally desynchronize it. */
@@ -140,7 +150,7 @@ static inline int TagOption_IsPresentation(int id) {
     case TAG_OPT_PRACTICE_PROMPTS:
     case TAG_OPT_PRACTICE_RECOVERY_TEXT:
     case TAG_OPT_WAVE_TITLE_TEXT:
-    case TAG_OPT_ROUND_END_TEXT:
+    case TAG_OPT_ROUND_END_TEXT: case TAG_OPT_MENU_HINT: case TAG_OPT_MENU_BUTTON:
         return 1;
     default:return 0;
     }

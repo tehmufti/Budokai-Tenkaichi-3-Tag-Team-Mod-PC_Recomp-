@@ -565,6 +565,8 @@ void BtlInput_Sample(BtlInputChr *chr) {
     in->rawHeld = pad->held;
     {
         extern s32 TagTeam_TargetStickConsumed(s32);
+        extern u32 TagTeam_ControlMask(s32);
+        in->rawHeld &= ~TagTeam_ControlMask(chr->player);
         if(TagTeam_TargetStickConsumed(chr->player)) in->rawHeld &= ~0xF00000;
     }
     {

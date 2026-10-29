@@ -5,6 +5,7 @@
 #include "battle/tag_challenge.h"
 #include "menu/tag_tournament.h"
 #include "battle/tag_options.h"
+#include "battle/tag_controls.h"
 #include "menu/tag_labels.h"
 #include "menu/tag_setup.h"
 #include "menu/port_screen.h"
@@ -46,19 +47,36 @@ void MainMenu_PlateGoto(s32 idx,char *label);
 #include "../../port/src/gs/tag_net.h"
 
 #define MAINMENU_TBO 11
-static s32 tagPage, tagMode, presetPage;
+static s32 tagPage, tagMode, presetPage, settingsPage;
+#define TAG_SETTINGS_ROWS (MAINMENU_ITEM_MAX-3)
 #define TAG_MENU_PRESET 100
 static s32 preset_count(void) {return tagMode==TAG_MODE_GAUNTLET?TagChallenge_Count():5;}
 static s32 preset_rows(void) {s32 n=preset_count()-presetPage*8;return n>8?8:n;}
 static s32 stockItems[MAINMENU_ITEM_MAX], stockCount, stockTop, stockCursor;
 /* The native plate movie uses a second texture sheet after row seven. Keep
    both sheets intact so long settings pages and returning to stock work. */
-static u8 stockLabels[2][12][512*32], tagLabels[2][12][512*32];
+static u8 stockLabels[2][MAINMENU_ITEM_MAX][512*32], tagLabels[2][MAINMENU_ITEM_MAX][512*32];
 static s32 tagLabelsReady;
-static s32 TagMenu_Option(s32 page,s32 row) {
+static s32 TagMenu_OptionAt(s32 page,s32 row) {
     s32 i;
     for(i=0;i<TAG_OPT_COUNT;i++) if(tagOptionInfo[i].group==page-5 && row--==0) return i;
     return -1;
+}
+static s32 TagMenu_Total(s32 page) {
+    s32 n=0;
+    if(page==4) return TAG_OPTION_GROUP_COUNT;
+    while(TagMenu_OptionAt(page,n)>=0) n++;
+    return n;
+}
+static s32 TagMenu_Rows(s32 page) {
+    s32 n=TagMenu_Total(page);
+    if(n<MAINMENU_ITEM_MAX) return n;
+    n-=settingsPage*TAG_SETTINGS_ROWS;
+    return n>TAG_SETTINGS_ROWS?TAG_SETTINGS_ROWS:n;
+}
+static s32 TagMenu_Option(s32 page,s32 row) {
+    if(row>=TagMenu_Rows(page)) return -1;
+    return TagMenu_OptionAt(page,row+(TagMenu_Total(page)>=MAINMENU_ITEM_MAX?settingsPage*TAG_SETTINGS_ROWS:0));
 }
 static s32 TagMenu_Count(s32 page) {
     s32 n=0;
@@ -66,10 +84,8 @@ static s32 TagMenu_Count(s32 page) {
     if(page==3) return 1; /* spatial setup page draws its own roster */
     if(page==2) return 6;
     if(page==1) return TagNet_HostMenu()?7:8;
-    if(page==4) return TAG_OPTION_GROUP_COUNT+1;
-    if(page<5) return 6;
-    while(TagMenu_Option(page,n)>=0) n++;
-    return n+1;
+    if(page<4) return 6;
+    return TagMenu_Rows(page)+(TagMenu_Total(page)>=MAINMENU_ITEM_MAX?3:1);
 }
 static s32 TagMenu_Label(s32 page,s32 row) {
     if(page==TAG_MENU_PRESET) {
@@ -80,8 +96,12 @@ static s32 TagMenu_Label(s32 page,s32 row) {
     if(page==1) {static const s32 labels[]={0,1,2,TAG_LABEL_GAUNTLET,TAG_LABEL_TOURNAMENT,TAG_LABEL_LOBBY,3,4};return TagNet_HostMenu() && row==6?TAG_LABEL_CLOSE_LOBBY:labels[TagNet_HostMenu() && row>=5?row+1:row];}
     if(page==3) return TAG_LABEL_CHOOSE;
     if(page==2 && row>=4) return row==4?TAG_LABEL_CPU:4;
-    if(page==4) return row==TAG_OPTION_GROUP_COUNT?4:TAG_LABEL_SETTINGS+row;
-    if(page>=5) return row==TagMenu_Count(page)-1?4:TAG_LABEL_OPTIONS+TagMenu_Option(page,row);
+    if(page>=4) {
+        s32 n=TagMenu_Rows(page);
+        if(row==TagMenu_Count(page)-1) return 4;
+        if(row>=n) return row==n?TAG_LABEL_PREV:TAG_LABEL_NEXT;
+        return page==4?TAG_LABEL_SETTINGS+row+(TagMenu_Total(page)>=MAINMENU_ITEM_MAX?settingsPage*TAG_SETTINGS_ROWS:0):TAG_LABEL_OPTIONS+TagMenu_Option(page,row);
+    }
     return (page==2?5:0)+row;
 }
 static void TagMenu_SettingChange(s32 row,s32 direction) {
@@ -140,12 +160,14 @@ static s32 PortMainMenu_WriteDisc(u8 *tex, s32 row, s32 lit) {
 }
 static void TagMenu_SetPage(s32 page) {
     extern s32 Port_MainTagLabel(s32,s32,s32,s32);
-    s32 lit,row,x,y,count=TagMenu_Count(page);
+    s32 lit,row,x,y,count;
+    if(page!=tagPage) settingsPage=0;
+    count=TagMenu_Count(page);
     MainMenu_PlateGoto(0,"fl_off_start");
     if(!tagPage && page) { stockTop=gMainMenu->top; stockCursor=gMainMenu->cursor; }
     tagPage=page;
     if(page==3) TagSetup_Reset();
-    for(lit=0;lit<2;lit++) for(row=0;row<(page?count:12);row++) {
+    for(lit=0;lit<2;lit++) for(row=0;row<(page?count:MAINMENU_ITEM_MAX);row++) {
         u8 *tex=gMainMenu->tex[lit?12:8]+(row/8)*0x40;
         u8 *px=*(u8 **)(tex+0x38)+0x60;
         u8 *labelPixels=page?tagLabels[lit][row]:stockLabels[lit][row];
@@ -175,7 +197,7 @@ static void TagMenu_Prepare(void) {
     if(!Port_TagAvailable()) { tagPage=0; return; }
     memcpy(stockItems,gMainMenu->items,sizeof(stockItems));
     stockCount=gMainMenu->itemCount; stockTop=gMainMenu->top; stockCursor=gMainMenu->cursor;
-    for(lit=0;lit<2;lit++) for(row=0;row<12;row++) {
+    for(lit=0;lit<2;lit++) for(row=0;row<MAINMENU_ITEM_MAX;row++) {
         u8 *tex=gMainMenu->tex[lit?12:8]+(row/8)*0x40;
         u8 *px=*(u8 **)(tex+0x38)+0x60;
         for(y=0;y<32;y++) for(x=0;x<512;x++)
@@ -200,7 +222,7 @@ static void TagMenu_Guide(void) {
     else Ps_Copy(heading,tagPage==4?"MOD SETTINGS":tagPage==3?"BATTLE SETUP":tagPage==2?"PLAYERS":"MODDED MODES",sizeof(heading));
     Ps_Heading(390,14,heading,0.75f,225,128);
     Ps_Rect(10,342,502,414,Ps_Rgba(12,49,65,115),Ps_Rgba(12,49,65,115));
-    if(tagPage!=TAG_MENU_PRESET && tagPage>=5 && row<TagMenu_Count(tagPage)-1) {
+    if(tagPage!=TAG_MENU_PRESET && tagPage>=5 && row<TagMenu_Rows(tagPage)) {
         s32 id=TagMenu_Option(tagPage,row),v=Port_TagOption(id);
         { extern void Port_TagOptionValue(s32,u32,s32),Port_TagPreview(s32),Hud_LoadTagPreview(void);
           Hud_LoadTagPreview();
@@ -216,7 +238,7 @@ static void TagMenu_Guide(void) {
         else if(tagPage==2 && row!=5) Ps_Copy(message,row==4?
             "Choose both rosters and watch the battle. L3 changes the fighter you follow.":
             "Choose how many people are playing on this PC.",sizeof(message));
-        else if(tagPage==4 && row!=TAG_OPTION_GROUP_COUNT) Ps_Copy(message,"Choose a group of mod settings.",sizeof(message));
+        else if(tagPage==4 && row<TagMenu_Rows(tagPage)) Ps_Copy(message,"Choose a group of mod settings.",sizeof(message));
         Ps_Text(256,359,message,0.8f,472,3);
     }
 }
@@ -612,7 +634,13 @@ void MainMenu_Draw(void) {
         if(tagPage==3) TagSetup_Draw();
         else {
             if(tagPage) TagMenu_Guide();
-            Ps_Text(256,427,TagNet_HostMenu()?(TagNet_HostChoosing()?"BRINGING GUESTS TO BATTLE SETUP":"CHOOSE A MODE FOR THE LOBBY"):tagPage?"SELECT - NORMAL MODES":"PRESS SELECT FOR MODDED MODES",0.65f,470,3);
+            if(TagNet_HostMenu())Ps_Text(256,427,TagNet_HostChoosing()?"BRINGING GUESTS TO BATTLE SETUP":"CHOOSE A MODE FOR THE LOBBY",0.65f,470,3);
+            else if(tagPage || Port_TagOption(TAG_OPT_MENU_HINT)) {
+                char hint[128];
+                sprintf(hint,Port_TagText(tagPage?"%s - NORMAL MODES":"%s - MODDED MODES"),
+                    TagControl_Name(TagControl_MenuButton(Port_TagOption(TAG_OPT_MENU_BUTTON))));
+                Ps_Text(256,427,hint,0.65f,470,3);
+            }
             if(TagNet_HostMenu())TagLobbyRoster_Draw(1);
         }
     }
@@ -679,7 +707,7 @@ void MainMenu_Input(s32 *result) {
         if(TagLobbyRoster_Input())return;
     }
     /* Select is available immediately, including while the native menu enters. */
-    if(!TagNet_HostMenu() && tagLabelsReady && !Port_TagControllersActive() && (gPad[0].gamePressed&PADG_SELECT)) {
+    if(!TagNet_HostMenu() && tagLabelsReady && !Port_TagControllersActive() && (gPad[0].pressed&TagControl_Button(TagControl_MenuButton(Port_TagOption(TAG_OPT_MENU_BUTTON))))) {
         TagSession_Leave(); TagMenu_SetPage(tagPage?0:1); Snd_PlaySe(1,0); return;
     }
     if(tagPage==3) {
@@ -754,10 +782,15 @@ void MainMenu_Input(s32 *result) {
                     else TagMenu_SetPage(3);
                 } else if(item==n+2) TagMenu_SetPage(TagNet_HostMenu()?1:2);
                 else {presetPage=(presetPage+(item==n?-1:1)+pages)%pages;TagMenu_SetPage(TAG_MENU_PRESET);}
+            } else if(tagPage>=4 && TagMenu_Total(tagPage)>=MAINMENU_ITEM_MAX &&
+                      item>=TagMenu_Rows(tagPage) && item<TagMenu_Count(tagPage)-1) {
+                s32 pages=(TagMenu_Total(tagPage)+TAG_SETTINGS_ROWS-1)/TAG_SETTINGS_ROWS;
+                settingsPage=(settingsPage+(item==TagMenu_Rows(tagPage)?-1:1)+pages)%pages;
+                TagMenu_SetPage(tagPage);
             } else if(tagPage>=5) {
                 if(item==TagMenu_Count(tagPage)-1) TagMenu_SetPage(4);
                 else TagMenu_SettingChange(item,1);
-            } else if(tagPage==4) TagMenu_SetPage(item==TAG_OPTION_GROUP_COUNT?1:5+item);
+            } else if(tagPage==4) TagMenu_SetPage(item==TagMenu_Count(tagPage)-1?1:5+item+settingsPage*TAG_SETTINGS_ROWS);
             else if(tagPage==1 && TagNet_HostMenu()) {
                 if(item<3)TagNet_ChoosePreset(item,0);
                 else if(item<5){tagMode=item;presetPage=0;TagMenu_SetPage(TAG_MENU_PRESET);}

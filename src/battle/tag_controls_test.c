@@ -410,6 +410,52 @@ void TagControls_TestTick(s32 tick) {
     Port_TagTestCheck(TagTeam_Target(0)==3,364);
     a->freeze=0;TagTeam_TargetInput(0,0);
     Port_TagTestCheck(TagTeam_Target(0)==1,365);
+    /* Remap every logical button, independently from the physical device.
+       A held press fires once; disabling unlock must not consume a second key. */
+    Port_TagOptionSet(TAG_OPT_TARGET_ATTACKER,0);
+    Port_TagOptionSet(TAG_OPT_TARGET_ORDER,2);
+    Port_TagOptionSet(TAG_OPT_LOCKOFF,0);
+    for(i=0;i<16;i++) {
+        s32 j,start=TagTeam_Target(0);
+        Port_TagOptionSet(TAG_OPT_TARGET_BUTTON,i);
+        TagTeam_TargetButtons(0,0);
+        TagTeam_TargetButtons(0,1u<<i);
+        Port_TagTestCheck(TagTeam_Target(0)!=start && !TagTeam_LockedOff(0),400+i);
+        start=TagTeam_Target(0);
+        for(j=0;j<60;j++)TagTeam_TargetButtons(0,1u<<i);
+        Port_TagTestCheck(TagTeam_Target(0)==start && !TagTeam_LockedOff(0),416+i);
+        TagTeam_TargetButtons(0,0);
+    }
+    Port_TagOptionSet(TAG_OPT_TARGET_BUTTON,2); /* R3 */
+    Port_TagOptionSet(TAG_OPT_TARGET_HOLD,100);
+    before=TagTeam_Target(0);
+    for(i=0;i<29;i++)TagTeam_TargetButtons(0,PAD_R3);
+    Port_TagTestCheck(TagTeam_Target(0)==before,432);
+    TagTeam_TargetButtons(0,PAD_R3);
+    Port_TagTestCheck(TagTeam_Target(0)!=before,433);
+    TagTeam_TargetButtons(0,0);
+    Port_TagOptionSet(TAG_OPT_LOCKOFF,1);
+    Port_TagOptionSet(TAG_OPT_LOCKOFF_BUTTON,0); /* Select */
+    Port_TagOptionSet(TAG_OPT_LOCKOFF_HOLD,0);
+    TagTeam_TargetButtons(0,PAD_SELECT);
+    Port_TagTestCheck(TagTeam_LockedOff(0),434);
+    for(i=0;i<60;i++)TagTeam_TargetButtons(0,PAD_SELECT);
+    TagTeam_TargetButtons(0,0);
+    Port_TagTestCheck(TagTeam_LockedOff(0),435);
+    for(i=0;i<30;i++)TagTeam_TargetButtons(0,PAD_R3);
+    TagTeam_TargetButtons(0,0);
+    Port_TagTestCheck(!TagTeam_LockedOff(0),436);
+    Port_TagOptionSet(TAG_OPT_TARGET_ATTACKER,2);
+    TagCpu_Damage(0,3,100);TagTeam_TargetButtons(0,0);
+    Port_TagTestCheck(TagTeam_Target(0)==3,437);
+    TagCpu_Damage(0,1,100);TagTeam_TargetButtons(0,0);
+    Port_TagTestCheck(TagTeam_Target(0)==1,438);
+    Port_TagOptionSet(TAG_OPT_TARGET_BUTTON,1);
+    Port_TagOptionSet(TAG_OPT_TARGET_HOLD,0);
+    Port_TagOptionSet(TAG_OPT_LOCKOFF_BUTTON,1);
+    Port_TagOptionSet(TAG_OPT_LOCKOFF_HOLD,50);
+    Port_TagOptionSet(TAG_OPT_TARGET_ORDER,0);
+    Port_TagOptionSet(TAG_OPT_TARGET_ATTACKER,1);
     BtlMember_GetActiveGauge(a)->health=0;
     BtlMember_GetActiveGauge(ally)->health=30000;
     BtlChar_ClearFlag(ally,7);

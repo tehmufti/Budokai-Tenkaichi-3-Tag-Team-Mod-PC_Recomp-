@@ -6,6 +6,9 @@
 #include "sys/pad_watch.h"
 #include "sys/adx.h"
 #include "sys/snd.h"
+#ifdef PORT
+#include "battle/tag_team.h"
+#endif
 
 /*
  * Pause request, 0x22F998-0x22FC40. Not part of the HUD: it remembers how many pads may pause the battle (2 in
@@ -58,6 +61,10 @@ s32 BtlPause_CheckOpen(void) {
     s32 i;
 
     for (i = 0; i < work->padCount; i++) {
+#ifdef PORT
+        /* A deliberately rebound Start belongs to targeting during combat. */
+        if(TagTeam_ControlMask(TagTeam_ControlActor(i)) & PAD_START) continue;
+#endif
         if (gPad[i].gamePressed & BTL_PAUSE_START) {
             work->pad = i;
             return 1;
@@ -78,7 +85,11 @@ s32 BtlPause_CheckOpen(void) {
             Snd_SetPause(TagTeam_Active() ? 0xF4 : 4, 1);
             return 0;
         }
-    } else if (gPad[0].gamePressed & BTL_PAUSE_START) {
+    } else if ((gPad[0].gamePressed & BTL_PAUSE_START)
+#ifdef PORT
+               && !(TagTeam_ControlMask(TagTeam_ControlActor(0)) & PAD_START)
+#endif
+    ) {
         return 1;
     }
     return 0;

@@ -8,7 +8,7 @@ Fight together with up to ten fighters on the field at once. This native version
 brings Tag Team battles to [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp),
 with BT3 and BT4 support, local split-screen, and direct online rooms.
 
-Download the [latest release](https://github.com/tehmufti/Budokai-Tenkaichi-3-Tag-Team-Mod-PC_Recomp-/releases/tag/v0.1.0-beta.2) for Windows or Linux.
+Download the [latest release](https://github.com/tehmufti/Budokai-Tenkaichi-3-Tag-Team-Mod-PC_Recomp-/releases/tag/v0.1.0-beta.3) for Windows or Linux.
 This beta runs without PCSX2. Setup imports the game data from your own supported `.iso`;
 no game disc or save data is included in the download.
 
@@ -26,6 +26,9 @@ no game disc or save data is included in the download.
   while the host chooses the next mode, then join the match or watch.
 - English and Spanish mod menus and settings.
 
+Choose target, lock-off and menu buttons under **Mod Settings > Controls**.
+Use **F1 > Controls** to map keyboard keys and controller inputs for each player.
+
 For controls and settings, see [Native Tag Team](NATIVE_TAG_TEAM.md).
 For hosting, joining and spectating, see [Online play](NATIVE_TAG_ONLINE.md).
 
@@ -38,6 +41,13 @@ existing Recomp save folder or PCSX2 `.ps2` memory card. Setup copies the save;
 the original stays untouched. Open **Play.exe** on Windows or **Play.sh** on Linux
 in the installed folder afterward.
 Python is included in setup and does not need to be installed separately.
+
+Already installed an earlier Recomp beta? Download the **Updater** for your
+operating system, extract it outside the game folder, close the game, and run
+**Update.exe** or **Update.sh**. Choose your existing installation. Your saves,
+settings, bindings and imported disc assets stay in place. The updater also
+repairs changed program files when the version number is already the same.
+If additional startup tables are needed, it asks for the original disc `.iso`.
 
 Linux needs an x86-64 system with glibc 2.35 or newer (such as Ubuntu 22.04 or
 newer), a desktop session and a working Vulkan graphics driver. Run setup and the

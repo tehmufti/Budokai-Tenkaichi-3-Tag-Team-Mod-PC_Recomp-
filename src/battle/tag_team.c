@@ -13,6 +13,7 @@
 #include "battle/btl_char_move.h"
 #include "battle/btl_seq.h"
 #include "battle/tag_options.h"
+#include "battle/tag_controls.h"
 #include "battle/tag_session.h"
 #include "battle/tag_lobby.h"
 #include "battle/tag_fusion.h"
@@ -45,6 +46,7 @@ static s32 viewActors[TAG_TEAM_CAPACITY], players[TAG_TEAM_CAPACITY];
 static s32 controlActors[TAG_TEAM_CAPACITY], initialActors[TAG_TEAM_CAPACITY];
 static s32 spectatorChosen[TAG_TEAM_CAPACITY];
 static s32 unlocked[TAG_TEAM_CAPACITY], targetHeld[TAG_TEAM_CAPACITY];
+static s32 unlockHeld[TAG_TEAM_CAPACITY],watchHeld[TAG_TEAM_CAPACITY];
 static s32 stickLatch[TAG_TEAM_CAPACITY],stickNeutral[TAG_TEAM_CAPACITY];
 static s32 stickPending[TAG_TEAM_CAPACITY],stickR3[TAG_TEAM_CAPACITY];
 static s32 pressAttacker[TAG_TEAM_CAPACITY],tapTarget[TAG_TEAM_CAPACITY],tapLife[TAG_TEAM_CAPACITY];
@@ -489,7 +491,7 @@ void TagTeam_Reset(void) {
             sides[actor].control = i < wantedPlayers ? BTL_CONTROL_PAD : BTL_CONTROL_CPU;
             sides[actor].pad = i < wantedPlayers ? i : 0;
         }
-        unlocked[i] = targetHeld[i] = 0;
+        unlocked[i] = targetHeld[i] = unlockHeld[i] = watchHeld[i] = 0;
         pressAttacker[i]=tapTarget[i]=-1;tapLife[i]=0;
         stickLatch[i]=stickNeutral[i]=stickPending[i]=stickR3[i]=0;
         targets[i] = i == 0 ? 1 : 0;
@@ -569,36 +571,78 @@ static void relock(s32 actor) {
     unlocked[actor]=0;
 }
 
-void TagTeam_TargetInput(s32 actor, s32 held) {
+/* Stable ordering includes the current target, so repeated presses progress
+   through the list instead of repeatedly selecting the nearest fighter. */
+static void ordered_target(s32 actor) {
+    s32 ids[TAG_TEAM_CAPACITY],n=0,i,j,v=0,order=Port_TagOption(TAG_OPT_TARGET_ORDER);
+    f32 keys[TAG_TEAM_CAPACITY];Mtx44 *m;
+    Vec4 own=((BtlMovePose *)&BtlChar_Get(actor)->pose)->pos;
+    extern BtlCamView *BtlCam_GetNativeView(s32);
+    if(unlocked[actor]) {relock(actor);return;}
+    for(i=0;i<viewCount;i++)if(TagTeam_ViewActor(i)==actor){v=i;break;}
+    m=&BtlCam_GetNativeView(v)->view.world2screen;
+    for(i=0;i<count;i++)if(targetable(actor,i)) {
+        Vec4 p=((BtlMovePose *)&BtlChar_Get(i)->pose)->pos;
+        f32 w=p.x*m->m[0][3]+p.y*m->m[1][3]+p.z*m->m[2][3]+m->m[3][3];
+        f32 key=(f32)i;
+        if(order==0)key=w>.3f?(p.x*m->m[0][0]+p.y*m->m[1][0]+p.z*m->m[2][0]+m->m[3][0])/w:1.0e15f;
+        if(order==1)key=(p.x-own.x)*(p.x-own.x)+(p.y-own.y)*(p.y-own.y)+(p.z-own.z)*(p.z-own.z);
+        for(j=n;j>0 && keys[j-1]>key;j--){keys[j]=keys[j-1];ids[j]=ids[j-1];}
+        keys[j]=key;ids[j]=i;n++;
+    }
+    if(!n)return;
+    for(i=0;i<n;i++)if(ids[i]==targets[actor])break;
+    targets[actor]=ids[i<n?(i+1)%n:0];
+}
+void TagTeam_TargetHit(s32 actor,s32 attacker) {
+    if(Port_TagOption(TAG_OPT_TARGET_ATTACKER)!=2 || TagTeam_InputPlayer(actor)<0 ||
+       TagTeam_LockedOff(actor) || !targetable(actor,attacker))return;
+    tapTarget[actor]=attacker;tapLife[actor]=15;
+}
+u32 TagTeam_ControlMask(s32 actor) {
+    u32 mask;
+    if(!TagTeam_Active() || (u32)actor>=(u32)count || TagTeam_InputPlayer(actor)<0)return 0;
+    mask=TagControl_Button(Port_TagOption(TAG_OPT_TARGET_BUTTON));
+    if(Port_TagOption(TAG_OPT_LOCKOFF))mask|=TagControl_Button(Port_TagOption(TAG_OPT_LOCKOFF_BUTTON));
+    return mask;
+}
+void TagTeam_TargetButtons(s32 actor,u32 buttons) {
+    u32 target=TagControl_Button(Port_TagOption(TAG_OPT_TARGET_BUTTON));
+    u32 off=TagControl_Button(Port_TagOption(TAG_OPT_LOCKOFF_BUTTON));
+    s32 held=(buttons&target)!=0,offHeld=Port_TagOption(TAG_OPT_LOCKOFF) && (buttons&off)!=0;
+    s32 shared=Port_TagOption(TAG_OPT_LOCKOFF) && target==off;
+    s32 ticks=TagControl_Ticks(Port_TagOption(TAG_OPT_TARGET_HOLD));
+    s32 offTicks=TagControl_Ticks(Port_TagOption(TAG_OPT_LOCKOFF_HOLD));
     s32 paired=grab_other(actor)>=0 || rush_other(actor)>=0 || BtlClash_Opponent(actor)>=0 ||
         BtlCharApi_IsChanging(BattleSide_GetObjId(actor)) || TagAssist_Active(actor);
-    if(paired) {targetHeld[actor]=held?-1:0;tapLife[actor]=0;return;}
-    if(held) {
-        if(targetHeld[actor]==0)pressAttacker[actor]=TagCpu_Attacker(actor);
-        if(targetHeld[actor]>=0 && ++targetHeld[actor]>=15) {
-            unlocked[actor]=1;
-            targetHeld[actor]=-1;tapLife[actor]=0;
-        }
-    } else {
-        if(targetHeld[actor]>0) {
-            s32 attacker=pressAttacker[actor];
-            if(attacker<0 || !targetable(actor,attacker))attacker=TagCpu_Attacker(actor);
-            tapTarget[actor]=attacker<0?-2:attacker;
-            tapLife[actor]=15;
-        }
-        targetHeld[actor]=0;
+    if(paired) {targetHeld[actor]=held?-1:0;unlockHeld[actor]=offHeld?-1:0;tapLife[actor]=0;return;}
+    if(held && targetHeld[actor]==0)pressAttacker[actor]=TagCpu_Attacker(actor);
+    /* A stick flick consumes the modifier for this whole press. */
+    if(shared && targetHeld[actor]<0 && held)unlockHeld[actor]=-1;
+    if(shared && offTicks<=ticks)offTicks=ticks+1;
+    if(TagControl_Press(&unlockHeld[actor],offHeld,offTicks,0)) {
+        unlocked[actor]=1;tapLife[actor]=0;
+        if(shared)targetHeld[actor]=-1;
     }
-    /* Short hit-stop may cover the entire click. Retain it briefly and apply
-       at the next safe update, without disturbing an active paired move. */
+    if(TagControl_Press(&targetHeld[actor],held,ticks,shared)) {
+        s32 attacker=pressAttacker[actor];
+        if(attacker<0 || !targetable(actor,attacker))attacker=TagCpu_Attacker(actor);
+        if(unlocked[actor] || Port_TagOption(TAG_OPT_TARGET_ATTACKER)!=1)attacker=-1;
+        tapTarget[actor]=attacker<0?-2:attacker;tapLife[actor]=15;
+    }
+    /* Keep a click through short hit-stop, never through an authored pair. */
     if(tapLife[actor]>0) {
         tapLife[actor]--;
         if(!busy(actor)) {
-            s32 target=tapTarget[actor];
-            if(target>=0 && targetable(actor,target)) {targets[actor]=target;unlocked[actor]=0;}
-            else relock(actor);
+            s32 next=tapTarget[actor];
+            if(next>=0 && targetable(actor,next)) {targets[actor]=next;unlocked[actor]=0;}
+            else ordered_target(actor);
             tapLife[actor]=0;
         }
     }
+}
+void TagTeam_TargetInput(s32 actor,s32 held) {
+    TagTeam_TargetButtons(actor,held?TagControl_Button(Port_TagOption(TAG_OPT_TARGET_BUTTON)):0);
 }
 
 static void aim_target(s32 actor,s32 direction) {
@@ -636,11 +680,12 @@ s32 TagTeam_TargetStickConsumed(s32 actor) {
 }
 void TagTeam_TargetStick(s32 actor,u32 buttons) {
     s32 bits=buttons&0xF00000,mode=Port_TagOption(TAG_OPT_TARGET_STICK);
+    u32 modifier=TagControl_Button(Port_TagOption(TAG_OPT_TARGET_BUTTON));
     s32 valid;
     /* R3 may be clicked with a slightly tilted stick when transforming. Never
        eat that click or switch its target, including on the following tick. */
     valid=mode && !busy(actor) && grab_other(actor)<0 && !TagAssist_Active(actor);
-    if(buttons&PAD_R3) stickR3[actor]=3;
+    if((buttons&PAD_R3) && !(TagTeam_ControlMask(actor)&PAD_R3)) stickR3[actor]=3;
     else if(stickR3[actor]) stickR3[actor]--;
     if(!bits) {
         stickLatch[actor]=stickPending[actor]=0;
@@ -648,18 +693,18 @@ void TagTeam_TargetStick(s32 actor,u32 buttons) {
         return;
     }
     if(stickPending[actor]) {
-        if(valid && !stickR3[actor] && (mode==2 ? !unlocked[actor] : (buttons&PAD_L3)!=0)) {
+        if(valid && !stickR3[actor] && (mode==2 ? !unlocked[actor] : (buttons&modifier)!=0)) {
             aim_target(actor,stickPending[actor]);
-            if(buttons&PAD_L3) targetHeld[actor]=-1;
+            if(buttons&modifier) targetHeld[actor]=-1;
         }
         stickPending[actor]=0;
     }
     if(stickLatch[actor]) return;
     if(valid && stickNeutral[actor]>=2 && !stickR3[actor] &&
-       !(buttons&(PAD_L2|PAD_TRIANGLE)) && (mode==2 ? !unlocked[actor] : (buttons&PAD_L3)!=0)) {
+       !(buttons&((PAD_L2|PAD_TRIANGLE)&~modifier)) && (mode==2 ? !unlocked[actor] : (buttons&modifier)!=0)) {
         stickLatch[actor]=1;
         stickPending[actor]=bits&-bits; /* one direction per return to neutral */
-        if(buttons&PAD_L3) targetHeld[actor]=-1;
+        if(buttons&modifier) targetHeld[actor]=-1;
     }
     stickNeutral[actor]=0;
 }
@@ -716,7 +761,7 @@ void TagTeam_RefreshControl(s32 actor) {
     input->injectButtons=0; input->injectStickX=input->injectStickY=0.0f;
     memset(&input->input,0,sizeof(input->input));
     BtlInput_Init(input);
-    targetHeld[actor]=0;
+    targetHeld[actor]=unlockHeld[actor]=0;
     stickLatch[actor]=stickNeutral[actor]=stickPending[actor]=stickR3[actor]=0;
 }
 static void bind_control(s32 actor, s32 player) {
@@ -786,18 +831,21 @@ void TagTeam_Update(void) {
         s32 player=TagTeam_InputPlayer(i);
         /* CPU decisions also guard queued damage: changing its recipient
            before the native sequence consumes that queue hits the wrong foe. */
-        if(TagChallenge_BetweenWaves()) {targetHeld[i]=0;tapLife[i]=0;stickPending[i]=0;continue;}
-        if (player>=0 && !targetable(i,targets[i])) TagTeam_CycleTarget(i);
+        if(TagChallenge_BetweenWaves()) {targetHeld[i]=unlockHeld[i]=0;tapLife[i]=0;stickPending[i]=0;continue;}
+        if (player>=0 && !targetable(i,targets[i])) {
+            if(unlocked[i] || Port_TagOption(TAG_OPT_TARGET_AFTER_KO))TagTeam_CycleTarget(i);
+            else relock(i);
+        }
         if (BtlSeq_IsFighting() && player>=0 && alive(i)) {
             TagTeam_TargetStick(i,gPad[player].held);
-            TagTeam_TargetInput(i,(gPad[player].held & PAD_L3)!=0);
+            TagTeam_TargetButtons(i,gPad[player].held);
         }
     }
     if (BtlSeq_IsFighting()) for (i=0;i<viewCount;i++) {
         s32 actor=controlActors[i],candidate;
         if(TagNet_Active() && actor<0)continue;
         if(!TagTeam_Spectating(i)) {
-            viewActors[i]=TagFusion_Owner(actor); spectatorChosen[i]=0; continue;
+            viewActors[i]=TagFusion_Owner(actor); spectatorChosen[i]=0; watchHeld[i]=0; continue;
         }
         if(spectatorChosen[i] && !watchable(viewActors[i])) spectatorChosen[i]=0;
         candidate=TagTeam_TakeoverCandidate(i);
@@ -811,7 +859,8 @@ void TagTeam_Update(void) {
                 }
             }
         }
-        if(gPad[i].pressed & PAD_L3) TagTeam_CycleSpectator(i);
+        if(TagControl_Press(&watchHeld[i],(gPad[i].held&TagControl_Button(Port_TagOption(TAG_OPT_TARGET_BUTTON)))!=0,
+            TagControl_Ticks(Port_TagOption(TAG_OPT_TARGET_HOLD)),0)) TagTeam_CycleSpectator(i);
         if(gPad[i].pressed & PAD_SQUARE) TagTeam_Takeover(i);
     }
     if (++traceFrame % 150 == 0) {

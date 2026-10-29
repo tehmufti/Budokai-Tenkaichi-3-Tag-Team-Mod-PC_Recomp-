@@ -125,10 +125,10 @@ CASES["fusion-settings"] = {
 CASES["stage-settings"] = {
     "pad": "150:select,180:down,210:down,240:down,270:down,300:down,330:down,350:cross,"+
            ",".join(f"{410+i*40}:down" for i in range(10))+
-           ",830:cross,890:right,950:down,1010:cross,1070:triangle,1130:select",
+           ",830:cross,890:down,950:cross,1010:right,1070:down,1130:cross,1190:triangle,1250:select",
     "end": r"frame=\d+ page=4 state=0,0,1,3,0",
-    "after":1130,"states":[(4,4),(4,15),(4,4),(4,1),(4,0)],
-    "env":{"BT3_UI_SHOT":"920:port/build/tag-menu-tests/stage-settings/menu.ppm"},
+    "after":1250,"states":[(4,4),(4,15),(4,4),(4,1),(4,0)],
+    "env":{"BT3_UI_SHOT":"1040:port/build/tag-menu-tests/stage-settings/menu.ppm"},
 }
 CASES["team-layout"] = {
     "pad": "150:select,210:cross,270:down,310:down,350:down,390:cross,"
@@ -136,6 +136,26 @@ CASES["team-layout"] = {
     "end": r"frame=\d+ page=4 state=3,0,0,0,0",
     "after":1040,"states":[(4,3),(45,1),(40,0),(4,3)],
     "assignments":[(1,1,0,1,4),(1,0,0,1,4)],
+}
+CASES["control-bindings"] = {
+    "pad":"150:select,180:down,210:down,240:down,270:down,300:down,330:down,350:cross,"
+          +",".join(f"{410+i*30}:down" for i in range(10))+
+          ",730:cross,790:down,830:down,870:down,950:cross,1010:down,1070:right,"+
+          ",".join(f"{1150+i*60}:down" for i in range(8))+
+          ",1690:right,1810:triangle,1870:triangle,1930:l3",
+    "end":r"frame=\d+ page=4 state=0,0,1,3,0",
+    "after":1930,"states":[(4,4),(4,17),(4,4),(4,1),(4,0)],
+    "env":{"BT3_UI_SHOT":"1740:port/build/tag-menu-tests/controls-menu.ppm"},
+}
+CASES["settings-pagination"] = {
+    "pad":"150:select,180:down,210:down,240:down,270:down,300:down,330:down,350:cross,"
+          +",".join(f"{410+i*30}:down" for i in range(10))+
+          ",730:cross,790:down,830:down,870:cross,"+
+          ",".join(f"{930+i*30}:down" for i in range(10))+
+          ",1250:cross,"+",".join(f"{1310+i*30}:down" for i in range(8))+
+          ",1570:right,1630:triangle,1690:triangle,1750:select",
+    "end":r"frame=\d+ page=4 state=0,0,1,3,0",
+    "after":1750,"states":[(4,4),(4,16),(4,4),(4,1),(4,0)],
 }
 CASES["cpu-swap"] = {
     "pad":"150:select,210:cross,270:cross,330:cross,390:right,450:cross,510:start,670:triangle",
@@ -285,6 +305,11 @@ def run(case, exe, renderer, data=None):
         assert "tag_fusion_swap_seconds=25\n" in settings.read_text(), "Fusion handoff interval did not persist"
     if case == "stage-settings":
         assert "tag_map_size=125\n" in settings.read_text(), "Expanded map size did not persist"
+    if case == "control-bindings":
+        assert "tag_target_button=2\n" in settings.read_text(), "Target button did not persist"
+        assert "tag_menu_button=1\n" in settings.read_text(), "Mod menu button did not persist"
+    if case == "settings-pagination":
+        assert "tag_round_end_text=0\n" in settings.read_text(), "Last HUD text setting was not reachable"
     if case == "pause":
         assert {int(p) for p in re.findall(r"page=93 state=(\d+),", text)} == {2, 3}, "Controller scripts leaked between players"
         for pad in (2, 3):

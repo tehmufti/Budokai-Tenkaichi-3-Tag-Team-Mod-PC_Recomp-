@@ -61,6 +61,7 @@ void TagCpu_Damage(s32 victim,s32 attacker,s32 damage) {
     value=grudge(victim,attacker)+damage;
     threats[victim][attacker].damage=value>32000?32000:value;
     threats[victim][attacker].tick=tick;
+    TagTeam_TargetHit(victim,attacker);
 }
 /* The same short warning window as the PCSX2 mod. Recent hits outrank
    distance; otherwise use the nearest enemy currently attacking this actor. */

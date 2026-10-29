@@ -14,12 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_SETTINGS 200
-static struct { char name[24]; int value; } sSet[MAX_SETTINGS];
+#define MAX_SETTINGS 1024
+static struct { char name[64]; int value; } sSet[MAX_SETTINGS];
 /* The few settings that are text (online name, menu language): `name="text"` in the file, after the numbers. A
    release from before these reads past such a line. */
-#define MAX_TEXTS 8
-static struct { char name[24]; char value[64]; } sText[MAX_TEXTS];
+#define MAX_TEXTS 32
+static struct { char name[64]; char value[64]; } sText[MAX_TEXTS];
 static int sTextCount;
 static int sDirty;
 static int sCount;
@@ -32,18 +32,18 @@ static const char *path(void) {
 }
 
 static void load(void) {
-    char line[128], name[24];
+    char line[256], name[64];
     int value;
     FILE *fp = path() != NULL ? fopen(path(), "r") : NULL;
 
     while (fp != NULL && fgets(line, sizeof(line), fp) != NULL && sCount < MAX_SETTINGS) {
         char text[64];
-        if (sscanf(line, " %23[a-z0-9_]=\"%63[^\"\n]", name, text) == 2) {
+        if (sscanf(line, " %63[a-z0-9_]=\"%63[^\"\n]", name, text) == 2) {
             if (sTextCount < MAX_TEXTS) {
                 strcpy(sText[sTextCount].name, name);
                 strcpy(sText[sTextCount++].value, text);
             }
-        } else if (sscanf(line, " %23[a-z0-9_]=%d", name, &value) == 2) {
+        } else if (sscanf(line, " %63[a-z0-9_]=%d", name, &value) == 2) {
             strcpy(sSet[sCount].name, name);
             sSet[sCount++].value = value;
         }

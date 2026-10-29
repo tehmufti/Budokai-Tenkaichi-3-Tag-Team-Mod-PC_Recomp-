@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--sdl', type=Path)
     parser.add_argument('--launcher', type=Path, default=ROOT / 'port/build/Play.exe')
     parser.add_argument('--output', type=Path, default=ROOT / 'port/build/native-setup')
+    parser.add_argument('--version', type=int, default=3, help='Native beta release number')
     args = parser.parse_args()
     windows = args.platform == 'windows'
     if windows != (sys.platform == 'win32'):
@@ -73,46 +74,67 @@ def main():
     shutil.copy2(ROOT / 'port/licenses/SDL.txt', licenses / 'SDL.txt')
     launcher = 'Play.exe' if windows else 'Play.sh'
     (payload / 'Read me.txt').write_text(
-        f'Tag Team Mod — Native Beta .2\n\nStart {launcher}. Press Select at the main menu for Modded Modes.\n'
+        f'Tag Team Mod — Recomp Beta .{args.version}\n\nStart {launcher}. Press Select at the main menu for Modded Modes.\n'
         'Double-click the game picture or press Alt+Enter to switch fullscreen. F11 also works.\n'
         'F1 opens graphics, controller, language and mod settings. Online modes are in the game menu.\n'
+        'Mod Settings > Controls changes target, lock-off and menu buttons. F1 > Controls changes keyboard and gamepad bindings.\n'
         'Your saves are in saves/. Setup copies imported saves; it never changes the original.\n'
         'English and Spanish mod menus are included. Disc audio comes from your selected disc.\n'
         'BT3: USA, Europe/Australia, Japan. BT4: B14 REV2 English and Spanish.\n\n'
         'Source: https://github.com/tehmufti/Budokai-Tenkaichi-3-Tag-Team-Mod-PC_Recomp-\n', encoding='utf-8')
     manifest = {p.relative_to(payload).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                 for p in sorted(payload.rglob('*')) if p.is_file() and p.name != 'manifest.json'}
-    (payload / 'release.json').write_text(json.dumps(dict(version='beta.2', platform=args.platform+'-x86_64'))+'\n')
+    (payload / 'release.json').write_text(json.dumps(dict(version=f'beta.{args.version}', platform=args.platform+'-x86_64'))+'\n')
     # Include release metadata in the same integrity manifest as every asset.
     manifest['release.json']=hashlib.sha256((payload/'release.json').read_bytes()).hexdigest()
     (payload / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
-        '--name', 'Setup', '--distpath', str(output), '--workpath', str(ROOT / ('port/build/setup-freeze-'+args.platform)),
-        '--specpath', str(ROOT / ('port/build/setup-freeze-'+args.platform)), '--paths', str(ROOT / 'port/tools'),
-        '--add-data', str(ROOT / 'port/tools/native_table_recipes.json') + os.pathsep + '.',
-        str(ROOT / 'port/tools/native_setup.py')], check=True)
+    for name,script in [('Setup','native_setup.py'),('Update','native_update.py')]:
+        subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
+            '--name', name, '--distpath', str(output), '--workpath', str(ROOT / ('port/build/'+name.lower()+'-freeze-'+args.platform)),
+            '--specpath', str(ROOT / ('port/build/'+name.lower()+'-freeze-'+args.platform)), '--paths', str(ROOT / 'port/tools'),
+            '--add-data', str(ROOT / 'port/tools/native_table_recipes.json') + os.pathsep + '.',
+            str(ROOT / 'port/tools'/script)], check=True)
     setup = 'Setup.exe' if windows else './Setup.sh'
     (output / 'Read me.txt').write_text(f'Extract the whole archive, then run {setup}.\n'
+        'Already installed? Run Update instead and choose your existing game folder.\n'
+        'Updating keeps your saves, settings, bindings and imported disc data. Close the game first.\n'
         'Choose your disc image, English or Spanish, and an optional existing save.\n'
         'Setup needs no separate Python installation. Keep the payload folder beside Setup.\n'
         f'After installation, open {launcher} in the folder you chose.\n\n'
         f'Extrae todo el archivo y ejecuta {setup}. Elige el disco, el idioma y una partida existente si la tienes.\n'
         'No hace falta instalar Python. Conserva la carpeta payload junto a Setup.\n'+
+        'Si ya lo tienes instalado, ejecuta Update y elige la carpeta del juego. Se conservan tus partidas y ajustes.\n'+
         ('' if windows else '\nLinux: x86-64, glibc 2.35 or newer (Ubuntu 22.04+), and a working Vulkan graphics driver.\nRun Setup.sh and Play.sh as your normal user, without sudo.\n'), encoding='utf-8')
-    archive = output.parent / ('Tag-Team-Recomp-Beta.2-Windows.zip' if windows else 'Tag-Team-Recomp-Beta.2-Linux-x86_64.tar.gz')
-    if windows:
-        with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-            for p in sorted(output.rglob('*')):
-                if p.is_file():z.write(p, p.relative_to(output))
-    else:
-        (output/'Setup.sh').write_text('#!/bin/sh\nset -eu\ncd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec "$PWD/Setup" "$@"\n')
-        (output/'Setup.sh').chmod(0o755)
-        with tarfile.open(archive, 'w:gz') as tar:
-            def public_metadata(info):
-                info.uid=info.gid=0;info.uname=info.gname=''
-                return info
-            for p in sorted(output.iterdir()):tar.add(p, arcname=p.name, filter=public_metadata)
-    print(archive)
+    if not windows:
+        for name in ('Setup','Update'):
+            (output/(name+'.sh')).write_text('#!/bin/sh\nset -eu\ncd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec "$PWD/'+name+'" "$@"\n')
+            (output/(name+'.sh')).chmod(0o755)
+    updater_readme=('Close the game. Extract this archive outside your installed game folder.\n'
+        'Run '+('Update.exe' if windows else './Update.sh')+' and choose that existing folder.\n'
+        'Saves, settings, controller bindings and disc assets stay in place.\n'
+        'Use the same disc ISO only if the updater asks for additional startup tables.\n'
+        'This works with earlier Recomp betas; it is not an updater for the PCSX2 mod.\n\n'
+        'Cierra el juego. Extrae el archivo fuera de la carpeta del juego instalado.\n'
+        'Ejecuta Update y elige la carpeta existente. Se conservan tus partidas, ajustes y controles.\n'
+        'Solo hace falta el disco original si se solicitan tablas adicionales.\n')
+    for update_only in (False,True):
+        import io
+        label='Updater-' if update_only else ''
+        archive=output.parent/(f'Tag-Team-Recomp-Beta.{args.version}-'+label+('Windows.zip' if windows else 'Linux-x86_64.tar.gz'))
+        paths=[p for p in sorted(output.rglob('*')) if p.is_file() and not (update_only and p.name in ('Setup','Setup.exe','Setup.sh'))]
+        if windows:
+            with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as z:
+                for p in paths:
+                    if update_only and p==output/'Read me.txt':z.writestr('Read me.txt',updater_readme)
+                    else:z.write(p,p.relative_to(output))
+        else:
+            with tarfile.open(archive,'w:gz') as tar:
+                for p in paths:
+                    info=tar.gettarinfo(str(p),arcname=p.relative_to(output).as_posix())
+                    info.uid=info.gid=0;info.uname=info.gname=''
+                    data=updater_readme.encode() if update_only and p==output/'Read me.txt' else p.read_bytes()
+                    info.size=len(data);tar.addfile(info,io.BytesIO(data))
+        print(archive)
 
 
 if __name__ == '__main__':

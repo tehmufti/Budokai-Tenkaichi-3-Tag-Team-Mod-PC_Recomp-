@@ -769,3 +769,42 @@ Left stick: move. Right stick: look. L1/R1: height. Keyboard uses your game bind
 Leave match	Abandonar combate
 Keep Fallen Fighters in Bounds	Mantener a los caídos dentro del escenario
 Catch KO'd fighters at the lower stage boundary so teammates can reach them. Ring-outs remain permanent.	Detiene a los luchadores noqueados en el límite inferior del escenario para que sus compañeros puedan alcanzarlos. Las eliminaciones por salida del ring siguen siendo permanentes.
+Target Button	Botón de objetivo
+Target Button Hold Time	Tiempo para cambiar de objetivo
+Allow Lock Off	Permitir desbloquear objetivo
+Lock Off Button	Botón para desbloquear objetivo
+Lock Off Hold Time	Tiempo para desbloquear objetivo
+Target Switch Order	Orden de cambio de objetivo
+Target Incoming Attacker	Apuntar a quien te ataca
+Target After a KO	Objetivo tras un KO
+Mod Menu Button	Botón del menú del mod
+Show Mod Menu Hint	Mostrar acceso al menú del mod
+Left to right	De izquierda a derecha
+Nearest first	Más cercanos primero
+Selection order	Orden de selección
+Never	Nunca
+Press during warning	Pulsar durante el aviso
+When hit	Al recibir daño
+Nearest camera centre	Más cerca del centro de la cámara
+Game default	Como en el juego original
+Hold target button and flick	Mantener el botón de objetivo y mover el stick
+%.2f seconds	%.2f segundos
+%d.%02d seconds	%d,%02d segundos
+%s - NORMAL MODES	%s - MODOS NORMALES
+%s - MODDED MODES	%s - MODOS DEL MOD
+%s - change view   Square - take over teammate	%s - cambiar vista   Cuadrado - controlar compañero
+%s - change spectator view	%s - cambiar vista de espectador
+Change target and cycle spectator views. Uses your keyboard or controller binding for this button.	Cambia de objetivo y de vista de espectador. Usa la tecla o el control asignado a este botón.
+How long to hold before switching targets. Zero is a tap. With a shared lock-off button, release to switch.	Tiempo que debes mantener el botón para cambiar de objetivo. Cero es un toque. Si compartes el botón con desbloquear, suéltalo para cambiar.
+Allow free flight without a target. Locking on again selects the enemy nearest the centre of your camera.	Permite moverte sin objetivo. Al fijar uno de nuevo, elige al enemigo más cercano al centro de la cámara.
+Use the target button with a longer hold, or choose a separate button.	Mantén el botón de objetivo más tiempo o elige un botón distinto.
+How long to hold before unlocking. A shared button always gives you time to release for a target switch.	Tiempo que debes mantener el botón para desbloquear. Un botón compartido siempre deja tiempo para soltarlo y cambiar de objetivo.
+Cycle targets from left to right on screen, nearest first, or in character selection order.	Recorre los objetivos de izquierda a derecha en pantalla, por cercanía o por orden de selección de personajes.
+Never, on a target-button press during an attack warning, or automatically after taking damage.	Nunca, al pulsar el botón de objetivo durante un aviso de ataque, o automáticamente al recibir daño.
+Choose the enemy nearest the centre of your camera, or use the normal next-target order.	Elige al enemigo más cercano al centro de la cámara o usa el orden normal del juego.
+Button that opens or closes the modded mode list from the main menu.	Botón que abre o cierra la lista de modos del mod desde el menú principal.
+Show the mod menu button on the main menu.	Muestra el botón de acceso al mod en el menú principal.
+Off, hold the target button and flick, or flick alone. Locked off, the stick still moves the camera.	Desactivado, mantener el botón de objetivo y mover el stick, o moverlo solo. Sin objetivo fijado, el stick sigue moviendo la cámara.
+Include defeated fighters when the target button switches the spectator camera.	Incluye a los luchadores derrotados al cambiar de cámara con el botón de objetivo.
+Choose targeting and menu buttons here. F1 > Controls binds those buttons to keys or gamepad inputs for each player. Controller Setup assigns devices to players. Target and lock-off buttons replace their normal battle actions.	Elige aquí los botones de objetivo y menú. F1 > Controles asigna teclas o botones del mando para cada jugador. Configurar mandos asigna los dispositivos. Los botones de objetivo y desbloqueo sustituyen a sus acciones normales en combate.
+Controls	Controles

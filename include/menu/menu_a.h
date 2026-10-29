@@ -171,7 +171,7 @@ extern MenuProgress *gProgress;
 /* ---- MainMenu (menu_a.c) ---- */
 
 #ifdef PORT
-#define MAINMENU_ITEM_MAX 12 /* PC: "Tenkaichi Budokai Online" (11) is listed too */
+#define MAINMENU_ITEM_MAX 12 /* PC: eight rows in the first sheet, four in the second. */
 #else
 #define MAINMENU_ITEM_MAX 11
 #endif

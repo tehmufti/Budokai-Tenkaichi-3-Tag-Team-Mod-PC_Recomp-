@@ -134,13 +134,13 @@ the entire base-game HUD. Mod indicators retain their own switches.
 
 - **F1:** the native port's graphics and controller/keyboard bindings.
 - **C / L3:** tap to target someone attacking you, even with right-stick targeting
-  enabled. If nobody else is attacking, select a target nearest the centre of
-  your view. Hold for half a second to lock off. Downed teammates
+  enabled. If nobody else is attacking, cycle targets in the chosen order.
+  Locking on from an unlocked view picks the target nearest its centre. Hold for half a second to lock off. Downed teammates
   can also be targeted while revival is enabled. Cinematic participants retain
   their targets until the move finishes.
 - **Flick the right stick:** switch targets in that direction on your screen,
   following the camera instead of the order in the roster.
-  Targeting and Views also offers requiring L3 while flicking, or disabling stick
+  Controls also offers requiring the target button while flicking, or disabling stick
   targeting. While locked off, the stick remains available for the camera.
 - **Enter / Start:** pause.
 - **Esc:** the native port's exit confirmation.
@@ -148,6 +148,14 @@ the entire base-game HUD. Mod indicators retain their own switches.
 The launchers use their own settings and saves under
 `port/build/native-prototype-settings.txt` and
 `port/build/native-prototype-saves`. Controls can be rebound in F1.
+
+**Mod Settings > Controls** changes the target/spectator button, lock-off button,
+their hold times, target order, attacker switching and targeting after a KO.
+The menu button and its on-screen hint are also adjustable. These use logical
+controller buttons; **F1 > Controls** assigns the actual keyboard keys and gamepad
+inputs for each player. A button reserved for targeting replaces its normal
+battle action. Shared target/lock-off buttons switch on release and unlock on
+the longer hold. Long native settings lists have Previous and Next pages.
 
 Choose **CPU Only** in the in-game player-count menu to watch a battle.
 For split-screen, open **Play.cmd** and select two, three or
