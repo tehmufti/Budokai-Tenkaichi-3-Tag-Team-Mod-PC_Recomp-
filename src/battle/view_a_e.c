@@ -986,9 +986,9 @@ void BgmList_ApplyUnlocks(s32 *count, s32 *ids) {
     if (PortGame_IsBT4()) {
         /* B14's archive pads the music list with repeated entry zero. Keep
            each playable track once, followed by Random (except Sound Test). */
-        u32 seen=0; s32 n=0;
-        for(i=0;i<*count;i++) if((u32)ids[i]<24 && !(seen&(1u<<ids[i]))) {
-            seen|=1u<<ids[i];ids[n++]=ids[i];
+        u8 seen[256]={0}; s32 n=0;
+        for(i=0;i<*count;i++) if((u32)ids[i]<256 && ids[i]!=BGMLIST_ID_RANDOM && !seen[ids[i]]) {
+            seen[ids[i]]=1;ids[n++]=ids[i];
         }
         if(gProgress->mode!=0x3E)ids[n++]=BGMLIST_ID_RANDOM;
         if(getenv("BT3_BGM_DEBUG")) {

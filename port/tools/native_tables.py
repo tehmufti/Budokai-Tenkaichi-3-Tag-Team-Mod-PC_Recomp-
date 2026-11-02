@@ -7,14 +7,14 @@ import hashlib
 import json
 from pathlib import Path
 import struct
-import pycdlib
+from native_disc import GameDisc
 
 RECIPES = Path(__file__).with_name('native_table_recipes.json')
 
 
 def identify(path):
     recipes = json.loads(RECIPES.read_text(encoding='utf-8'))
-    iso = pycdlib.PyCdlib()
+    iso = GameDisc()
     iso.open(str(path))
     try:
         members = {r.file_identifier().decode().split(';')[0] for r in iso.list_children(iso_path='/')}

@@ -1967,6 +1967,26 @@ static int ml_item_pics(MlCtx *c, unsigned char *out[2], const char *text) {
     return ok;
 }
 
+/* The disc's own battle-song catalogue, including BT4's additional tracks.
+   No texture cutting or shared letter buffers are used here. */
+int MenuLabels_MusicIds(const char *root,int *ids,int capacity) {
+    MlCtx *c=calloc(1,sizeof(*c));MlBuf screen,list;uint32_t count,id;
+    unsigned char seen[256]={0};int n=0;
+    if(!c)return 0;
+    if(ml_read_one(c,root,ml_file(448),0)==MENU_LABELS_MADE &&
+       ml_screen(c,448,2,&screen) && ml_section(c,screen,56,&list) &&
+       ml_get32(list,0,&count) && count<1024) {
+        for(unsigned i=0;i<count;i++) {
+            if(!ml_get32(list,16+i*4,&id)){n=0;break;}
+            if(id<256 && id!=24 && !seen[id]) {
+                if(n>=capacity){n=0;break;}
+                seen[id]=1;ids[n++]=(int)id;
+            }
+        }
+    }
+    ml_free(c);free(c);return n;
+}
+
 int MenuLabels_MainItem(const char *dataDir, unsigned char *out[2]) {
     MlCtx *c = calloc(1, sizeof(*c));
     int ok = 0;

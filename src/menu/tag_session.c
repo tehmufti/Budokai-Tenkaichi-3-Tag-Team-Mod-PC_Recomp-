@@ -12,13 +12,13 @@
 
 static s32 selected, mode, humans=1;
 static s32 duelTime=3,comLevel=2;
-static s32 musicIds[1+24+PORT_SONG_MAX],musicCount,musicChoice;
+static s32 musicIds[1+256+PORT_SONG_MAX],musicCount,musicChoice;
 static void music_reset(void) {
     s32 i;
     musicCount=1;musicChoice=0;musicIds[0]=TS_BGM_RANDOM;
     PortSongs_Refresh();
-    for(i=0;i<(PortGame_IsBT4()?24:20);i++)
-        if(PortGame_IsBT4() || (gSaveData->bgmBits&(1u<<i)))musicIds[musicCount++]=i;
+    for(i=0;i<(PortGame_IsBT4()?PortGame_MusicCount():20);i++)
+        if(PortGame_IsBT4() || (gSaveData->bgmBits&(1u<<i)))musicIds[musicCount++]=PortGame_MusicAt(i);
     if(!PortGame_IsBT4())for(i=0;i<gPortSongCount && i<PORT_SONG_MAX;i++)
         musicIds[musicCount++]=gPortSongOffsets[i];
 }

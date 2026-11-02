@@ -605,7 +605,7 @@ static void start(Player *p, const char *path) {
 /* Battle music is presentation, not a source of rollback inputs. The game
    sees one continuing music channel; advancing this local playlist never
    touches its RNG, file queue, or recorded voice timings. */
-static char battleSongs[24 + PORT_SONG_MAX][512];
+static char battleSongs[256 + PORT_SONG_MAX][512];
 static int battleSongCount;
 static uint64_t musicRandom;
 
@@ -647,9 +647,9 @@ void Port_BattleMusicBegin(int random, unsigned unlocked) {
     if(gPortResim)return;
     battleSongCount=0;
     if(random) {
-        int bt4=PortGame_IsBT4(), count=bt4?24:20;
+        int bt4=PortGame_IsBT4(), count=bt4?PortGame_MusicCount():20;
         for(i=0;i<count+(!bt4?gPortSongCount:0);i++) {
-            int track=i<count?i:gPortSongOffsets[i-count];
+            int track=i<count?PortGame_MusicAt(i):gPortSongOffsets[i-count];
             if(!bt4 && i<count && !(unlocked&(1u<<i)))continue;
             int file=PORT_BGM_FILE(track);
             char path[512];
@@ -657,7 +657,7 @@ void Port_BattleMusicBegin(int random, unsigned unlocked) {
                 FILE *f=fopen(path,"rb");unsigned char header[2];
                 int valid=f && fread(header,1,2,f)==2 && header[0]==0x80 && !header[1];
                 if(f)fclose(f);
-                if(valid && battleSongCount<24+PORT_SONG_MAX)
+                if(valid && battleSongCount<256+PORT_SONG_MAX)
                     snprintf(battleSongs[battleSongCount++],512,"%s",path);
             }
         }

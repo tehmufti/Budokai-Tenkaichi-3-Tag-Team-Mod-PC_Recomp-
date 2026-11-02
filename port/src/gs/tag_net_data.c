@@ -16,7 +16,12 @@
 #include "../../third_party/xxhash/xxhash.h"
 extern const char *Port_FileRoot(void);
 extern int Port_DataFingerprint(unsigned long long *);
-extern void Gs_HoldFrame(void);
+extern int TagNet_DataProgress(unsigned done,unsigned total);
+static SDL_AtomicInt progress,stopped,finished;
+static unsigned progressTotal;
+static unsigned long long result;
+static int cancelled;
+int TagNet_DataCancelled(void) {return cancelled;}
 
 typedef struct FileHash {
     uint64_t size,modified,created,hash;
@@ -32,6 +37,7 @@ static int inventory(const char *root,unsigned part,unsigned count,int overlay,F
     if(scan==INVALID_HANDLE_VALUE)return overlay;
     do {
         char tail;unsigned id;
+        if(SDL_GetAtomicInt(&stopped)){FindClose(scan);return 0;}
         if(item.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)continue;
         if(sscanf(item.cFileName,"%5u.bin%c",&id,&tail)!=1 || id>=count)continue;
         out[id].size=(uint64_t)item.nFileSizeHigh<<32|item.nFileSizeLow;
@@ -43,20 +49,15 @@ static int inventory(const char *root,unsigned part,unsigned count,int overlay,F
 }
 #endif
 
-unsigned long long TagNet_DataIdentity(void) {
+static unsigned long long bt4_identity(void) {
     unsigned count[4],TOTAL=0;
     const char *root=Port_FileRoot();
     unsigned part,id,n=0,changed=0;uint64_t marker=0;int oldCache=0;
-    FileHash *cache,*files=NULL;XXH3_state_t all;FILE *f;char path[1600],cachePath[1600];
+    FileHash *cache,*files=NULL;XXH3_state_t *all=XXH3_createState(),*hash=XXH3_createState();FILE *f;char path[1600],cachePath[1600];
     unsigned char *buffer;Uint64 began=SDL_GetTicks();
-    if(!PortGame_IsBT4()) {
-        unsigned long long h=0;
-        while(Port_DataFingerprint(&h)!=1 && SDL_GetTicks()-began<120000){Gs_HoldFrame();SDL_Delay(10);}
-        return h;
-    }
     for(part=0;part<4;part++){count[part]=PortGame_VolumeCount(part);TOTAL+=count[part];}
     cache=calloc(TOTAL,sizeof(*cache));buffer=malloc(1024*1024);
-    if(!cache || !buffer){free(cache);free(buffer);return 0;}
+    if(!cache || !buffer || !all || !hash)goto error;
     snprintf(cachePath,sizeof(cachePath),"%s/.tag-online-bt4-v3-%u",root,TOTAL);
 #ifdef _WIN32
     files=calloc(TOTAL,sizeof(*files));if(!files)goto error;
@@ -73,8 +74,9 @@ unsigned long long TagNet_DataIdentity(void) {
         }
         fclose(f);
     }
-    XXH3_64bits_reset(&all);
+    XXH3_64bits_reset(all);
     for(part=0;part<4;part++)for(id=0;id<count[part];id++,n++) {
+        if(SDL_GetAtomicInt(&stopped))goto error;
         if(id==0)fprintf(stderr,"tagnet: checking BT4 volume %u/4\n",part+1);
         struct stat st;FileHash current;int override=1;
         memset(&current,0,sizeof(current));
@@ -100,26 +102,57 @@ unsigned long long TagNet_DataIdentity(void) {
         if(cache[n].hash && current.size==cache[n].size && current.modified==cache[n].modified &&
            current.created==cache[n].created && current.override==cache[n].override)current.hash=cache[n].hash;
         else {
-            XXH3_state_t hash;size_t got;uint64_t read=0;
+            size_t got;uint64_t read=0;
             f=fopen(path,"rb");if(!f)goto error;
-            XXH3_64bits_reset(&hash);
-            while((got=fread(buffer,1,1024*1024,f))!=0){XXH3_64bits_update(&hash,buffer,got);read+=got;}
+            XXH3_64bits_reset(hash);
+            while((got=fread(buffer,1,1024*1024,f))!=0){XXH3_64bits_update(hash,buffer,got);read+=got;}
             if(ferror(f) || read!=current.size){fclose(f);goto error;}
-            fclose(f);current.hash=XXH3_64bits_digest(&hash);changed++;
+            fclose(f);current.hash=XXH3_64bits_digest(hash);changed++;
         }
         cache[n]=current;
         /* Only content enters the network identity, not times or overrides. */
-        XXH3_64bits_update(&all,&current.hash,8);
-        if(n%512==0)Gs_HoldFrame();
+        XXH3_64bits_update(all,&current.hash,8);
+        SDL_SetAtomicInt(&progress,(int)n+1);
     }
     if(changed || oldCache) {
         /* Concurrent local test clients may calculate the same cache. A short
          * or interrupted cache is discarded in full on the next launch. */
         f=fopen(cachePath,"wb");if(f){marker=0x544e425434000001ull;fwrite(&marker,8,1,f);fwrite(cache,sizeof(*cache),TOTAL,f);fclose(f);}
     }
-    marker=XXH3_64bits_digest(&all);
+    marker=XXH3_64bits_digest(all);
     fprintf(stderr,"tagnet: BT4 resources %016llx (%u refreshed, %llu ms)\n",(unsigned long long)marker,changed,(unsigned long long)(SDL_GetTicks()-began));
-    free(files);free(cache);free(buffer);return marker;
+    XXH3_freeState(all);XXH3_freeState(hash);free(files);free(cache);free(buffer);return marker;
 error:
-    free(files);free(cache);free(buffer);return 0;
+    XXH3_freeState(all);XXH3_freeState(hash);free(files);free(cache);free(buffer);return 0;
+}
+
+static int SDLCALL check_worker(void *unused) {
+    (void)unused;result=bt4_identity();SDL_SetAtomicInt(&finished,1);return 0;
+}
+unsigned long long TagNet_DataIdentity(void) {
+    Uint64 began=SDL_GetTicks();cancelled=0;
+    if(!PortGame_IsBT4()) {
+        unsigned long long h=0;
+        while(Port_DataFingerprint(&h)!=1 && SDL_GetTicks()-began<120000) {
+            if(TagNet_DataProgress(0,0)){cancelled=1;return 0;}
+            SDL_Delay(10);
+        }
+        return h;
+    }
+    /* Disk reads must not stop rendering/input or repeatedly draw an old
+       fade frame. The worker touches only immutable paths and file bytes. */
+    progressTotal=0;
+    for(int part=0;part<4;part++)progressTotal+=PortGame_VolumeCount(part);
+    SDL_SetAtomicInt(&progress,0);SDL_SetAtomicInt(&stopped,0);SDL_SetAtomicInt(&finished,0);result=0;
+    if(TagNet_DataProgress(0,progressTotal)){cancelled=1;return 0;}
+    SDL_Thread *thread=SDL_CreateThread(check_worker,"disc-compatibility",NULL);
+    if(!thread)return 0;
+    while(!SDL_GetAtomicInt(&finished)) {
+        if(TagNet_DataProgress((unsigned)SDL_GetAtomicInt(&progress),progressTotal)) {
+            cancelled=1;SDL_SetAtomicInt(&stopped,1);break;
+        }
+        SDL_Delay(10);
+    }
+    SDL_WaitThread(thread,NULL);
+    return cancelled?0:result;
 }

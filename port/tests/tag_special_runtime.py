@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[2]
-CASES={4:"beam",5:"rush",6:"shared-beam",7:"ultimate",8:"pause-off",9:"two-beams"}
+CASES={4:"beam",5:"rush",6:"shared-beam",7:"ultimate",8:"pause-off",9:"two-beams",14:"pause-target",15:"pause-everyone",16:"melee-contact",17:"melee-locked-only",18:"melee-crowd"}
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)

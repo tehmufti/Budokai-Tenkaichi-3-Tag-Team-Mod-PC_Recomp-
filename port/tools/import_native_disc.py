@@ -13,7 +13,7 @@ from pathlib import Path
 import shutil
 import struct
 
-import pycdlib
+from native_disc import GameDisc
 
 PROFILES = {
     'SLUS_216.78': ('us', (1, 3399, 65201),
@@ -101,7 +101,7 @@ def extract(iso_path, output):
     output = Path(output)
     if output.exists() and any(output.iterdir()):
         raise ValueError('Choose an empty destination; existing game data will not be replaced.')
-    iso = pycdlib.PyCdlib()
+    iso = GameDisc()
     iso.open(str(iso_path))
     opened = True
     try:

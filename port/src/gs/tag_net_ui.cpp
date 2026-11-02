@@ -38,6 +38,7 @@ extern "C" void TagNet_MenuPointer(unsigned output) {
 extern "C" void TagNet_MenuName(int kind,int id,unsigned output,int size) {
     const char *n=kind==0?name(id):kind==1?stage_name(id):nullptr;
     static const char *bt4Songs[]={"Bu Yuu Retsuden","Dragon Crisis","Victory Road","Little Light","Super Sonic","Explosion (RB1)","Final Confrontation","Dark Half","Denouement","Stand After Confusion","The Warrior","Tense Atmosphere","Challenger","Gallant","Sky Battle for Justice","Move Forward Fearlessly","Dynamite Battle","Burnin' Up","Wild Rush","Evolution","Force Of Justice","Challengers","Joker","Evil Desires"};
+    if(kind==2 && id>24 && PortGame_IsBT4()) {std::snprintf((char *)(uintptr_t)output,size,"%s %d",Port_TagText("Track"),id+1);return;}
     if(kind==2){auto songs=PortGame_IsBT4()?bt4Songs:MenuTranslation_SongNames();n=id==24?"Random":songs&&id>=0&&id<24?songs[id]:"Music";}
     std::snprintf((char *)(uintptr_t)output,size,"%s",Port_TagText(n?n:"Unknown"));
 }

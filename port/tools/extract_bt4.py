@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import struct
 
-import pycdlib
+from native_disc import GameDisc
 
 
 def extract_movies(iso, output):
@@ -64,7 +64,7 @@ def extract(iso_path, output):
     marker = output / 'native-disc.json'
     if output.exists() and any(output.iterdir()):
         raise ValueError('This destination already contains a disc; choose an empty destination.')
-    iso = pycdlib.PyCdlib()
+    iso = GameDisc()
     iso.open(str(iso_path))
     try:
         def read(name):

@@ -8,7 +8,7 @@ Fight together with up to ten fighters on the field at once. This native version
 brings Tag Team battles to [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp),
 with BT3 and BT4 support, local split-screen, and direct online rooms.
 
-Download the [latest release](https://github.com/tehmufti/Budokai-Tenkaichi-3-Tag-Team-Mod-PC_Recomp-/releases/tag/v0.1.0-beta.3) for Windows or Linux.
+Download the [latest release](https://github.com/tehmufti/Budokai-Tenkaichi-3-Tag-Team-Mod-PC_Recomp-/releases/tag/v0.1.0-beta.4) for Windows or Linux.
 This beta runs without PCSX2. Setup imports the game data from your own supported `.iso`;
 no game disc or save data is included in the download.
 
@@ -90,9 +90,9 @@ Keep locally extracted tables and disc assets out of Git.
 
 Online connections are direct to the host's IPv4 address and TCP port. There is
 no matchmaking service or relay for the modded rooms. Internet hosting may need
-port forwarding, and everyone needs a matching build and game data. Windows and
-Linux native builds currently use separate rooms. Multi-client
-checks on one computer do not replace testing between separate PCs and networks.
+port forwarding, and everyone needs a matching release and game data.
+Windows and Linux x86-64 players can join the same room. The host sets the
+game speed; each guest keeps their own display settings.
 
 ## Contributing
 

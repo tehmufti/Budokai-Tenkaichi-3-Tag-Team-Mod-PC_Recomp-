@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--sdl', type=Path)
     parser.add_argument('--launcher', type=Path, default=ROOT / 'port/build/Play.exe')
     parser.add_argument('--output', type=Path, default=ROOT / 'port/build/native-setup')
-    parser.add_argument('--version', type=int, default=3, help='Native beta release number')
+    parser.add_argument('--version', type=int, default=4, help='Native beta release number')
     args = parser.parse_args()
     windows = args.platform == 'windows'
     if windows != (sys.platform == 'win32'):

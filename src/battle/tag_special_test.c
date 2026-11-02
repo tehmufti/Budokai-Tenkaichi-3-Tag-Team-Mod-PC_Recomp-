@@ -17,16 +17,51 @@ extern s32 BtlStage_FindZoneNear(s32,Vec4 *),BtlChar_TestFlag(BtlMgrChr *,s32);
 extern s32 BtlChar_IsFrozen(BtlMgrChr *),BtlCharApi_HasCamPriority(s32);
 extern s32 Port_TagCinemaTest(void);
 extern void Port_TagTestCheck(s32,s32),Port_TagSpecialTrace(s32,s32,s32,s32,s32);
+static void melee_contact_test(s32 tick,s32 kind) {
+    extern s32 BtlAtk_GetId(BtlMgrChr *);
+    extern void TagContact_Clear(s32),TagContact_Record(s32,s32),BtlColl_Update(void);
+    BtlMgrChr *a=BtlChar_Get(0);s32 i;
+    if(tick==30) {
+        Port_TagOptionSet(TAG_OPT_MELEE_CONTACT,kind!=17);
+        for(i=0;i<4;i++) {
+            BtlMgrChr *c=BtlChar_Get(i);StgGroundHit floor;
+            Vec4 p={0,0,i==0?0:i==2?-10:i==1&&kind!=18?250:12,1},r={0,i?3.14159265f:0,0,0};
+            p.y=BtlStage_GetTop()+1;BtlStage_ProbeGround(-1,&p,&floor);p.y=floor.y;
+            BtlAct_ClearQueue(c);BtlAct_Request(c,0xB);
+            BtlChar_Place(c,&p,&r,BtlStage_FindZoneNear(-1,&p));
+            BtlMember_GetActiveGauge(c)->health=100000;
+            c->freeze=c->freezeNext=c->freezeDelay=0;
+        }
+        for(i=0;i<4 && TagTeam_Target(0)!=1;i++)TagTeam_CycleTarget(0);
+        Port_TagTestCheck(TagTeam_Target(0)==1,695);
+    }
+    if(tick==35)BtlAct_Request(a,0x70);
+    if(tick==37) {
+        Port_TagTestCheck(BtlAtk_GetId(a)>=0,690);
+        for(i=0;i<4;i++)TagContact_Clear(i);
+        TagContact_Record(0,2);TagContact_Record(0,3);
+        if(kind==18)TagContact_Record(0,1);
+        Port_TagSpecialTrace(tick,BtlAtk_GetId(a),BtlChar_TestFlag(a,0x60),TagTeam_CanContact(0,3),Port_TagOption(TAG_OPT_MELEE_CONTACT));
+        BtlColl_Update();
+        Port_TagSpecialTrace(tick,BtlChar_Get(3)->action,BtlChar_TestFlag(BtlChar_Get(3),0x42),BtlMember_GetActiveGauge(BtlChar_Get(3))->health,*(s32 *)((u8 *)a+0xF40));
+        Port_TagTestCheck((BtlMember_GetActiveGauge(BtlChar_Get(3))->health<100000)==(kind!=17),691);
+        Port_TagTestCheck((BtlMember_GetActiveGauge(BtlChar_Get(1))->health<100000)==(kind==18),692);
+        Port_TagTestCheck(BtlMember_GetActiveGauge(BtlChar_Get(2))->health==100000,693);
+        Port_TagTestCheck(TagTeam_Target(0)==1,694);
+        Port_TagTestCheck(1,99);
+    }
+}
 void TagSpecial_TestTick(s32 tick) {
-    static s32 startup,paused,damage,settled;
+    static s32 startup,paused,damage,settled,targetPaused;
     s32 i,kind=Port_TagCinemaTest(),shared=kind==6||kind==7;
     BtlMgrChr *a=BtlChar_Get(0);
+    if(kind>=16 && kind<=18){melee_contact_test(tick,kind);return;}
     if(tick==30) {
         Port_TagOptionSet(TAG_OPT_LOCAL_CINEMATICS,1);
         Port_TagOptionSet(TAG_OPT_SHARED_SPECIAL,kind==6);
         Port_TagOptionSet(TAG_OPT_SHARED_RUSH,0);
         Port_TagOptionSet(TAG_OPT_SHARED_ULTIMATE,1);
-        Port_TagOptionSet(TAG_OPT_CINEMATIC_PAUSE,kind==8?0:2);
+        Port_TagOptionSet(TAG_OPT_CINEMATIC_PAUSE,kind==14?1:kind==15||shared?2:0);
         for(i=0;i<4;i++) {
             BtlMgrChr *c=BtlChar_Get(i);
             Vec4 p={i==1?300.0f:i==2?-300.0f:0,-100,i==3?75.0f:0,1};
@@ -79,8 +114,12 @@ void TagSpecial_TestTick(s32 tick) {
             s32 visible=(BtlChar_GetObj(other)->flags&2)!=0;
             if(flags||frozen||!visible) Port_TagSpecialTrace(tick,flags,frozen,visible,other->action);
             Port_TagTestCheck(visible,670);
-            if(!shared) Port_TagTestCheck(!frozen,671);
+            if(!shared && kind!=15) Port_TagTestCheck(!frozen,671);
             if(frozen) paused++;
+            if(kind==14 || kind==15) {
+                if(TagTeam_CinematicPaused(3))targetPaused++;
+                Port_TagTestCheck(!TagTeam_CinematicPaused(0),685);
+            }
         }
         if(kind==9 && tick<100) {
             /* A second special must not be held behind the first one's
@@ -95,6 +134,8 @@ void TagSpecial_TestTick(s32 tick) {
             Port_TagTestCheck(startup>0,674);
             Port_TagTestCheck(damage,675);
             if(shared) Port_TagTestCheck(paused>0,676);
+            if(kind==14 || kind==15)Port_TagTestCheck(targetPaused>0,686);
+            if(kind==15)Port_TagTestCheck(paused>0,687);
             for(i=0;i<4;i++) Port_TagTestCheck(!TagTeam_CinematicPaused(i),677+i);
             Port_TagTestCheck(1,99);
         }

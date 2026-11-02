@@ -34,7 +34,7 @@ extern int Port_TagOption(int);
 extern unsigned long long Port_NetDigest(void);
 extern int gPortResim;
 
-enum { PROTOCOL=6, MAGIC=0x544e4554, PAD=18, RING=8192, MAX_PACKET=4096, QUEUE=262144,
+enum { PROTOCOL=7, MAGIC=0x544e4554, PAD=18, RING=8192, MAX_PACKET=4096, QUEUE=262144,
        TN_HELLO=1, TN_CONFIG, TN_READY, TN_START, TN_LOADED, TN_GO, TN_INPUT, TN_DIGEST, TN_LEAVE, TN_REJECT, TN_EDIT, TN_FINISHED, TN_ROOM, TN_PING, TN_PEERS, TN_ROLE, TN_NOTICE, TN_PRACTICE_END,
        TN_HISTORY,TN_REPLAY_PROGRESS,TN_MEMBER,TN_PRACTICE_EDIT,TN_PRACTICE_LOADOUT,TN_BRACKET,TN_PONG,TN_ROSTER,TN_SCORES,
        PEERS=TN_PLAYERS+TN_SPECTATORS-1, DELAY=2, ROLLBACK=8 };
@@ -64,6 +64,11 @@ static unsigned nextSend;
 static unsigned char inputs[TN_PLAYERS][RING][PAD],used[TN_PLAYERS][RING][PAD];
 static uint64_t digest[RING];
 static unsigned digestStamp[RING];
+#if defined(_WIN64) || (defined(__linux__) && defined(__x86_64__))
+#define TN_PLATFORM 1 /* Tested x86-64 soft-float simulation family, PE or ELF. */
+#else
+#define TN_PLATFORM 3
+#endif
 static uint64_t identity,dataIdentity;
 static unsigned roundId;
 static int roomSpectators,roomMask,lastPeerState=-1;
@@ -336,6 +341,11 @@ int TagNet_View(void) {
     if(TagNet_Observer() && getenv("BT3_TAG_NET_WATCH_TEST"))a=(frame/60)%(config.size[0]+config.size[1]);
     return a;
 }
+int TagNet_SpeedMilli(void) {
+    int speed;extern int Port_GameSpeed(void);
+    SDL_LockSpinlock(&uiLock);speed=status.phase>=2 && status.phase<=4?status.config.speed:0;SDL_UnlockSpinlock(&uiLock);
+    return (speed>=50 && speed<=200?speed:Port_GameSpeed())*10;
+}
 int TagNet_Option(int id,int fallback) {
     int value=fallback;
     /* Renderer and game thread both read these. Publish one immutable rules
@@ -353,20 +363,14 @@ void TagNet_Audit(int actor,unsigned addr,unsigned size) {
 }
 
 static uint64_t build_identity(void) {
-    char path[1200];unsigned char buf[65536];FILE *f;size_t n,i;uint64_t h=14695981039346656037ull;
-#ifdef _WIN32
-    GetModuleFileNameA(NULL,path,sizeof(path));
-#else
-    int len=(int)readlink("/proc/self/exe",path,sizeof(path)-1);if(len<0)return 0;path[len]=0;
-#endif
-    f=fopen(path,"rb");if(!f)return 0;
-    while((n=fread(buf,1,sizeof(buf),f)))for(i=0;i<n;i++)h=(h^buf[i])*1099511628211ull;
-    fclose(f);return h;
+    extern unsigned long long TagNet_BuildIdentity(void);
+    return TagNet_BuildIdentity();
 }
 static int valid(const TagNetConfig *c) {
     int i,n,owners[TN_PLAYERS]={0};
+    if(c->speed<50 || c->speed>200)return 0;
     if(c->disc!=PortGame_IsBT4() || c->revision<=0 || c->size[0]<1 || c->size[0]>5 || c->size[1]<1 || c->size[1]>5 ||
-       c->stage<0 || c->stage>=PortGame_StageCount() || c->stage==35 || c->music<0 || c->music>24 || c->time<0 || c->time>5 || c->cpu<0 || c->cpu>4)return 0;
+       c->stage<0 || c->stage>=PortGame_StageCount() || c->stage==35 || !PortGame_HasMusic(c->music) || c->time<0 || c->time>5 || c->cpu<0 || c->cpu>4)return 0;
     if(c->party<0 || c->party>1 || c->practice<0 || c->practice>1 || c->mode<0 || c->mode>TL_TOURNAMENT || c->preset<0 || c->preset>127 || c->heal<0 || c->heal>4)return 0;
     if(c->party)for(i=0;i<TL_MEMBERS;i++) {
         const TlMember *m=&c->lobby.members[i];int k;
@@ -606,11 +610,18 @@ static void handle(Peer *p,int type,const unsigned char *data,unsigned n) {
     if(!p->hello && type!=TN_HELLO && !(!host && type==TN_REJECT))return;
     if(type==TN_HELLO) {
         if(p->hello)return;
-        if(n!=36 || get32(data)!=MAGIC || get32(data+4)!=PROTOCOL || get32(data+8)!=(unsigned)config.disc || get32(data+32)!=(unsigned)TagNet_IsParty() ||
-           get32(data+12)!=(uint32_t)(identity>>32) || get32(data+16)!=(uint32_t)identity ||
-           get32(data+24)!=(uint32_t)(dataIdentity>>32) || get32(data+28)!=(uint32_t)dataIdentity) {
-            const char *s="The game build or disc does not match the host.";send_packet(p,TN_REJECT,s,(unsigned)strlen(s)+1);return;
-        }
+        const char *mismatch=NULL;
+        if(n!=40 || get32(data)!=MAGIC || get32(data+4)!=PROTOCOL)
+            mismatch="Online versions differ. Both players must install the same update.";
+        else if(get32(data+36)!=TN_PLATFORM)
+            mismatch="These CPU architectures cannot share a room. Use the Windows or Linux x86-64 build.";
+        else if(get32(data+12)!=(uint32_t)(identity>>32) || get32(data+16)!=(uint32_t)identity)
+            mismatch="The native game builds differ. Update both installations from the same release.";
+        else if(get32(data+8)!=(unsigned)config.disc || get32(data+24)!=(uint32_t)(dataIdentity>>32) || get32(data+28)!=(uint32_t)dataIdentity)
+            mismatch="The game data differs. Use the same disc revision and game-data mods on both PCs.";
+        else if(get32(data+32)!=(unsigned)TagNet_IsParty())
+            mismatch="The host is using a different online mode.";
+        if(mismatch){send_packet(p,TN_REJECT,mismatch,(unsigned)strlen(mismatch)+1);return;}
         if(host) {
             int r=(int)get32(data+20);
             if(config.party && (phase==2 || phase==4)) {
@@ -841,7 +852,7 @@ static void begin_socket(int r,const char *address,int port) {
         i=connect(fd,(struct sockaddr *)&addr,sizeof(addr));
         if(i && !blocked()){closesocket(fd);phase=1;say("Could not connect to the host.");return;}
         peers[0].fd=fd;peers[0].last=SDL_GetTicks();peers[0].connecting=i!=0;
-        {unsigned char h[36];put32(h,MAGIC);put32(h+4,PROTOCOL);put32(h+8,config.disc);put32(h+12,(unsigned)(identity>>32));put32(h+16,(unsigned)identity);put32(h+20,r);put32(h+24,(unsigned)(dataIdentity>>32));put32(h+28,(unsigned)dataIdentity);put32(h+32,TagNet_IsParty());send_packet(&peers[0],TN_HELLO,h,36);}
+        {unsigned char h[40];put32(h,MAGIC);put32(h+4,PROTOCOL);put32(h+8,config.disc);put32(h+12,(unsigned)(identity>>32));put32(h+16,(unsigned)identity);put32(h+20,r);put32(h+24,(unsigned)(dataIdentity>>32));put32(h+28,(unsigned)dataIdentity);put32(h+32,TagNet_IsParty());put32(h+36,TN_PLATFORM);send_packet(&peers[0],TN_HELLO,h,40);}
         say("Connecting to the host...");
     }
 }
@@ -913,6 +924,12 @@ int TagNet_HostPoll(void) {
     commands();pump();coordinator();publish();
     return phase==5 || phase<2 || (phase==2 && !config.practice);
 }
+int TagNet_DataProgress(unsigned done,unsigned total) {
+    extern int TagOnlineMenu_Frame(void);
+    if(total)snprintf(message,sizeof(message),"Checking game compatibility... %u%% (%u / %u files)",done*100/total,done,total);
+    else snprintf(message,sizeof(message),"Checking game compatibility...");
+    publish();return TagOnlineMenu_Frame();
+}
 int TagNet_Room(void) {
     extern void TagOnlineMenu_Open(void),TagOnlineMenu_Close(void);
     extern void TagOnline_SaveScope(int);
@@ -933,8 +950,10 @@ int TagNet_Room(void) {
         { extern unsigned long long TagNet_DataIdentity(void);
           say("Checking game compatibility...");publish();TagOnlineMenu_Frame();
           dataIdentity=TagNet_DataIdentity();
+          {extern int TagNet_DataCancelled(void);if(TagNet_DataCancelled()){roomInitialized=0;leaveMenu=1;goto close_menu;}}
           if(!identity || !dataIdentity){failed("Could not check the native build or game files. Restore the complete game data.");} }
         config.revision=1;config.disc=PortGame_IsBT4();config.seed=0x127391;
+        {extern int Port_GameSpeed(void);config.speed=Port_GameSpeed();}
         config.stage=2;config.music=0;config.time=3;config.cpu=2;config.size[0]=config.size[1]=3;
         for(i=0;i<10;i++){config.chara[i]=i%2?31:3;config.owner[i]=-1;config.cpuLevel[i]=-1;}
         config.owner[0]=0;
@@ -973,6 +992,10 @@ int TagNet_Room(void) {
     if(!Port_RollCan())failed("Rollback state files are missing. Rebuild or restore the complete native build.");
     while(phase!=3) {
         commands();pump();
+        if(host && phase==2) {
+            extern int Port_GameSpeed(void);int speed=Port_GameSpeed();
+            if(config.speed!=speed){TagNetConfig c=config;c.speed=speed;apply_edit(&c);}
+        }
         if((!identity || !dataIdentity) && phase!=5)failed("Could not check the native build or game files. Restore the complete game data.");
         if(phase==2 && getenv("BT3_TAG_TEST_ROLE_SWAP")) {
             if(host) {
@@ -1002,6 +1025,7 @@ int TagNet_Room(void) {
         if(TagOnlineMenu_Frame()){leaveMenu=1;break;}
         if(phase==5 && getenv("BT3_TAG_AUTO_READY")){leaveMenu=1;break;}
     }
+close_menu:
     TagOnlineMenu_Close();nativeMenu=0;
     if(leaveMenu || phase==5) {
         broadcast(TN_LEAVE,NULL,0,NULL);pump();
@@ -1205,7 +1229,7 @@ void TagNet_Tick(unsigned blank) {
             if(host)broadcast(TN_DIGEST,b,16,NULL);else send_packet(&peers[0],TN_DIGEST,b,16);
         }
         check_digests(checked);sentDigest=checked;
-        if(frame%600==0)fprintf(stderr,"tagnet: frame %u, confirmed %u, players %d, rewinds %u\n",frame,confirmed(),popcount(player_mask()),status.rollbacks);
+        if(frame%600==0)fprintf(stderr,"tagnet: frame %u, confirmed %u, players %d, rewinds %u, speed %d%%\n",frame,confirmed(),popcount(player_mask()),status.rollbacks,TagNet_SpeedMilli()/10);
         pump();publish();
     }
     if(role<TN_PLAYERS) {

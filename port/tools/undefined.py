@@ -5,6 +5,7 @@ import collections, concurrent.futures, os, pathlib, re, shutil, subprocess, sys
 import portsrc
 import eeconst
 import buildkey
+import net_build
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 # The build variants (BT3_CC): see toolchain.py.
@@ -134,12 +135,15 @@ def cc(f):
 
 def main():
     OBJ.mkdir(parents=True, exist_ok=True)
+    (OBJ / 'tag-net-build.json').unlink(missing_ok=True)
+    started = net_build.source_digest(ROOT)
     key = buildkey.flags()  # (first: a key that cannot be used stops the build before anything is compiled)
     fs = portsrc.sources()
     with concurrent.futures.ProcessPoolExecutor(16) as ex:
         res = list(ex.map(cc, fs))
     pending = [p for _, _, _, p in res if p]  # (the macOS build: files waiting for mac_finish)
     bad = [(f, e) for o, f, e, _ in res if o is None]
+    failures = len(bad)
     for f, e in bad:
         print("FAILED", f.name, next((l for l in e.splitlines() if "rror" in l or l.startswith("ptr32")), e.strip()[:150])[:200])
     objs = [str(o) for o, _, _, _ in res if o]
@@ -166,6 +170,7 @@ def main():
             else:
                 r = subprocess.run([PREFIX + "as"] + ([] if WIN else ["--64"]) + [str(f), "-o", str(DATA / (f.name[:-2] + ".o"))], capture_output=True, text=True)
             if r.returncode:
+                failures += 1
                 print("FAILED", f.name, r.stderr.splitlines()[0][:150])
         objs += [str(o) for o in sorted(DATA.glob("*.o"))]
     else:
@@ -177,6 +182,7 @@ def main():
                         "-malign-double", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-builtin", "-w",
                         "-Iport/include", f"-I{f.parent}", "-include", "newlib_shim.h"], f, o)
         if r.returncode:
+            failures += 1
             print("FAILED", f.name, r.stderr.splitlines()[0][:150])
         else:
             objs.append(str(o))
@@ -204,6 +210,7 @@ def main():
             else:  # the reference compiler of the same language (package glslang-tools)
                 r = subprocess.run(["glslangValidator", "-V", "-S", stage, str(src), "-o", str(spv)], capture_output=True, text=True)
             if r.returncode:
+                failures += 1
                 print("FAILED shader", src.name, r.stderr[:300])
                 continue
         arrays.append(f"static const unsigned char {name}[] = {{" + ",".join(str(b) for b in spv.read_bytes()) + "};\n")
@@ -212,6 +219,7 @@ def main():
             r = subprocess.run(["spirv-cross", "--msl", "--msl-version", "20100", "--msl-decoration-binding", str(spv), "--output", str(msl)],
                                capture_output=True, text=True)
             if r.returncode:
+                failures += 1
                 print("FAILED shader (MSL)", src.name, r.stderr[:300])
                 continue
             arrays.append(f"static const unsigned char {name[:-3]}Msl[] = {{" + ",".join(str(b) for b in msl.read_bytes() + b"\0") + "};\n")
@@ -235,6 +243,7 @@ def main():
                             "-Wall", "-Wno-unused", "-Wno-misleading-indentation", f"-I{gen}"] + (key if f.name == "net_sign.c" else []) + [str(f), "-o", str(o)], cwd=ROOT,
                            capture_output=True, text=True)
         if r.returncode:
+            failures += 1
             print("FAILED", f.name, "\n".join(l for l in r.stderr.splitlines() if "error" in l)[:400])
         else:
             objs.append(str(o))
@@ -251,6 +260,7 @@ def main():
                             "-fno-rtti", "-w", f"-I{imgui}", f"-I{ROOT / 'port/src/gs'}", f"-I{gen}", str(f), "-o", str(o)], cwd=ROOT,
                            capture_output=True, text=True)
         if r.returncode:
+            failures += 1
             print("FAILED", f.name, "\n".join(l for l in r.stderr.splitlines() if "error" in l)[:600])
         else:
             objs.append(str(o))
@@ -267,6 +277,7 @@ def main():
         else:
             r = run(cmd + [str(f), "-o", str(o)], cwd=ROOT, capture_output=True, text=True)
         if r.returncode:
+            failures += 1
             print("FAILED", f.name, r.stderr.splitlines()[0][:150])
         else:
             objs.append(str(o))
@@ -278,6 +289,7 @@ def main():
         with concurrent.futures.ProcessPoolExecutor(16) as ex:
             for o, rc, err in ex.map(mac_finish, pending):
                 if rc:
+                    failures += 1
                     print("FAILED", pathlib.Path(o).name, next((l for l in err.splitlines() if "rror" in l or "macwin" in l), err.strip()[:150])[:300])
                     objs.remove(o)
     defined, undef = set(), collections.Counter()
@@ -322,6 +334,9 @@ def main():
             print("       " + " ".join(sorted(v)))
     (ROOT / "port/build/undefined.txt").write_text(
         "".join(f"{k}\t{s}\n" for k, v in sorted(kinds.items()) for s in sorted(v)))
+    if failures:
+        raise SystemExit(f'{failures} compilation steps failed; linking is disabled.')
+    net_build.save_manifest(ROOT, OBJ, DATA, VARIANT, started)
 
 if __name__ == "__main__":
     main()

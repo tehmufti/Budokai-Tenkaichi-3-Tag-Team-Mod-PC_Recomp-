@@ -19,6 +19,8 @@ p.add_argument('--timeout', type=int, default=90)
 p.add_argument('--startup-timeout',type=int,default=600,help='Allow a first-run BT4 content fingerprint to finish')
 p.add_argument('--audit', action='store_true')
 p.add_argument('--input', action='store_true')
+p.add_argument('--host-speed',type=int,default=100)
+p.add_argument('--guest-speed',type=int,default=100)
 p.add_argument('--lag', action='store_true')
 p.add_argument('--size', help='Team sizes; cinematic fixtures default to their authored 2v2 setup, other cases to 5v5')
 p.add_argument('--case', type=int, default=0)
@@ -59,6 +61,7 @@ if a.swap_roles:env['BT3_TAG_TEST_ROLE_SWAP']='1'
 if a.high_fusion:env['BT3_TAG_TEST_HIGH_FUSION']='1'
 if a.watch_camera:env['BT3_TAG_NET_WATCH_TEST']='1'
 if a.gpu:env['BT3_GS']='gpu'
+if a.gpu or a.gpu_client:env['BT3_TAG_CAMERA_TRACE']='1'
 if a.sound:
     env.pop('BT3_NOSOUND',None)
     env['BT3_SOUND']='1'  # Headless clients must also open their audio backend.
@@ -73,11 +76,12 @@ if a.party and a.rounds:expected[9]=['PASS 2500','PASS 2501']
 
 def spawn(name):
     e=env.copy();e['BT3_SAVES']=str(out/('saves-'+name));e['BT3_SETTINGS']=str(out/(name+'.settings'))
+    pathlib.Path(e['BT3_SETTINGS']).write_text('game_speed='+str(a.host_speed if name=='host' else a.guest_speed)+'\n')
     # Real hosts run at display speed. An uncapped headless host otherwise
     # creates replay history as quickly as a replacement can consume it.
     if name=='host' and (a.rejoin or a.late_join):e['BT3_PACED']='1'
     if a.gpu_client==name:e['BT3_GS']='gpu'
-    if a.capture_ms and (not a.gpu_client or a.gpu_client==name):e['BT3_UI_SHOT_MS']=str(a.capture_ms)+':'+str(out/(name+'.ppm'))
+    if a.capture_ms and (not a.gpu_client or a.gpu_client==name):e['BT3_UI_SHOT_MS']=str(a.capture_ms)+':'+(out/(name+'.ppm')).relative_to(root).as_posix()
     pathlib.Path(e['BT3_SAVES']).mkdir(exist_ok=True)
     if name=='guest' and a.load_delay:e['BT3_TAG_TEST_LOAD_DELAY_MS']=str(a.load_delay)
     if name=='host' and a.host_spectator:e['BT3_TAG_TEST_HOST_SPECTATOR']='1'
@@ -162,6 +166,8 @@ finally:
 for name,proc,_,log in jobs:
     content=log.read_text(errors='replace')
     assert 'FAIL' not in content and 'divergence' not in content and 'went out of sync' not in content, log
+    speeds=list(map(int,re.findall(r'rewinds \d+, speed (\d+)%',content)))
+    if speeds:assert set(speeds)=={a.host_speed},(log,speeds,a.host_speed)
     if name==a.disconnect or (a.rejoin and name=='guest'):continue
     if a.kick and name=='guest':
         assert 'The host removed you from the lobby.' in content and 'PASS 2600' in content and proc.returncode==0,log

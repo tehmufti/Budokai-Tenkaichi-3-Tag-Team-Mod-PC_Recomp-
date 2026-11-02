@@ -76,8 +76,8 @@ one computer; they are not a substitute for a multi-PC playtest.
 
 ## Hosting and joining
 
-Everyone needs matching game data and the same native build. Windows and Linux
-currently use separate online rooms. Choose **Host a Room**, confirm the TCP
+Everyone needs matching game data and the same release. Windows and Linux
+x86-64 players can share a room. Choose **Host a Room**, confirm the TCP
 port (7001 by default), and open the lobby. Guests choose **Join a Room** and
 enter the host's reachable IPv4 address and port.
 
@@ -113,7 +113,8 @@ a match; losing the host ends the room.
 
 The compatibility check compares build and game-content fingerprints, not
 installation paths. The first BT4 check reads its extracted resources and can
-take a few minutes on a slow drive. Later launches reuse content hashes when
+take a few minutes on a slow drive. Progress is shown and you can cancel.
+Later launches reuse content hashes when
 the files have not changed. This check happens before opening a room.
 
 ## Rollback and current coverage
@@ -146,11 +147,16 @@ Local Windows tests have exercised actual socket connections with:
 - GPU-rendered matches with audio enabled, per-player health/ki panels, and
   spectator view changes/free camera.
 
-These are same-PC tests. Separate PCs over the internet, high jitter/loss,
-long sessions, and Linux online play still need testing. Build identity currently
-requires identical binaries, so Windows/Linux cross-play is not enabled. The
-current native disc support is BT3 USA and English BT4 B14 REV2; the PCSX2
-mod's other regional adapters are separate.
+Windows/Linux connections have also exercised revivals, timed fusion and
+defusion, beam assists, simultaneous clashes, overlapping cinematics and repeated
+lobby returns, including delayed inputs and a rendered guest view. These are
+same-PC checks; separate PCs over the internet and long sessions need further
+playtesting. The shared build fingerprint checks game source and compiler
+compatibility rather than requiring identical Windows and Linux executables.
+Disc-content checks remain separate. All players still need the same disc revision.
+
+Online matches follow the host's game speed. Guests keep their own offline speed
+preference when they leave the room.
 
 The repeatable runner is `port/tests/tag_online_runtime.py`. Its default tests
 use isolated saves/settings and real game processes on loopback. For example:

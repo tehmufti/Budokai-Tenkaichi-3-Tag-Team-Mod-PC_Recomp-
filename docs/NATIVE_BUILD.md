@@ -77,8 +77,8 @@ Its icon is in `port/assets/tag-team.ico`. The installer places Play.exe and
 Tag Team Mod Logo.png in the installation folder.
 
 On Windows, use an isolated Python environment with `pyinstaller` and `pycdlib`,
-then run `python port/tools/package_native_setup.py --platform windows`. This
-produces `port/build/Tag-Team-Recomp-Beta.2-Windows.zip`. It contains Setup.exe,
+then run `python port/tools/package_native_setup.py --platform windows --version 4`. This
+produces `port/build/Tag-Team-Recomp-Beta.4-Windows.zip`. It contains Setup.exe,
 a readme and one payload folder, with no extracted game assets or saves.
 
 For Linux, build in Ubuntu 22.04 or an equivalent glibc 2.35 environment. Compile
@@ -88,14 +88,14 @@ minimum system requirement. Keep the CPU target at generic x86-64. Then:
 ```sh
 BT3_CC=clang64 python3 port/tools/strip_data.py --data gamedata --out port/build/installer-portable-linux
 cp port/build/bt3_64.mem port/build/installer-portable-linux/bt3.mem
-python3 port/tools/package_native_setup.py --platform linux \
+python3 port/tools/package_native_setup.py --platform linux --version 4 \
   --portable port/build/installer-portable-linux \
   --sdl /usr/local/lib/libSDL3.so.0 --output port/build/native-setup-linux
 ```
 
 Freeze each installer on its own operating system, using a Python environment
 with PyInstaller, pycdlib and Tk installed. Packaging requires an empty output
-folder. The Linux archive is `Tag-Team-Recomp-Beta.2-Linux-x86_64.tar.gz`; its
+folder. The Linux archive is `Tag-Team-Recomp-Beta.4-Linux-x86_64.tar.gz`; its
 Setup.sh opens the bundled installer. It installs Play.sh, the game, SDL and the
 chosen disc's data. Neither installer needs a system Python installation.
 
@@ -123,3 +123,8 @@ python port/tests/tag_online_runtime.py --players 10 --spectators 10 --lag --inp
 
 The online runner starts separate local processes. It does not contact a relay
 or matchmaking service. Results and temporary profiles stay under `port/build/`.
+
+Online builds record a fingerprint of the shared source and compiler when
+`undefined.py` finishes. `link.py` refuses stale sources or objects; rerun
+`undefined.py` after editing compiled code. Matching Windows/Linux x86-64
+builds share this fingerprint without comparing their executable formats.

@@ -104,6 +104,25 @@ int PortGame_StageCount(void) { return PortGame_IsBT4()?99:36; }
 const char *PortGame_CharacterName(int c) {
     return PortGame_IsBT4() && c>=0 && c<250 && names[c][0]?names[c]:NULL;
 }
+static int musicIds[256],musicCount=-1;
+int PortGame_MusicCount(void) {
+    if(!PortGame_IsBT4())return 24;
+    if(musicCount<0) {
+        extern int MenuLabels_MusicIds(const char *,int *,int);
+        musicCount=MenuLabels_MusicIds(Port_FileRoot(),musicIds,256);
+        if(!musicCount)fail("The battle music catalogue is missing or damaged.");
+    }
+    return musicCount;
+}
+int PortGame_MusicAt(int index) {
+    int count=PortGame_MusicCount();
+    return index>=0 && index<count?(PortGame_IsBT4()?musicIds[index]:index):24;
+}
+int PortGame_HasMusic(int track) {
+    if(track==24)return 1;
+    for(int i=0;i<PortGame_MusicCount();i++)if(PortGame_MusicAt(i)==track)return 1;
+    return 0;
+}
 int PortGame_MusicFile(int track) { return (PortGame_IsBT4()?2070:0x10B16)+track; }
 int PortGame_StreamFile(int id) {
     if(!PortGame_IsBT4()) return id;

@@ -33,6 +33,7 @@ void TagOnlineMenu_Close(void);
 static char *entry(void) {return connectRole==0?hostPort:address;}
 static void *duelArt,*selectArt,*chipPack,*stagePack,*faceData,*stageData;
 static MTexRes *background,*facePic,*stagePic;
+static MTexRes *musicArt[2];
 static s32 faceId=-1,stageId=-1;
 static TagNetStatus room;
 static TlTournament bracket;
@@ -64,6 +65,11 @@ static void sprite(MTexRes *pic,s32 index,f32 x,f32 y,f32 w,f32 h,s32 u0,s32 v0,
 static void texture(MTexRes *pic,f32 x,f32 y,f32 w,f32 h) {
     u64 tex;if(!pic)return;tex=*(u64 *)(pic->tex+0x30);
     sprite(pic,0,x,y,w,h,0,0,1<<((tex>>26)&15),1<<((tex>>30)&15),128);
+}
+static void music_label(s32 id,f32 x,f32 y,f32 w,f32 h,s32 lit) {
+    if(PortGame_IsBT4() && id!=24 && id>=0 && id<256)
+        sprite(musicArt[lit!=0],id/8,x,y,w,h,0,(id%8)*32,512,(id%8+1)*32,128);
+    else {name(2,id,label,sizeof(label));text(x+w/2,Ps_TextTop(y+h/2,0.7f),label,0.7f,w,3);}
 }
 static void portrait(s32 id,f32 x,f32 y,f32 w,f32 h) {
     MTexRes *pic;if(id<0||id>=PortGame_CharacterCount())return;
@@ -183,7 +189,7 @@ static void activate(s32 id) {
                 c.chara[i]=0;c.costume[i]=0;c.owner[i]=-1;c.cpuLevel[i]=-1;c.lobby.draft.team[i]=team;memset(c.items[i],0,sizeof(c.items[i]));c.size[team]++;commit(&c);
             }
         } else if(id==10){choice=c.stage;go(STAGE,100+choice);}
-        else if(id==11){choice=c.music;go(MUSIC,100+choice);}
+        else if(id==11){choice=0;while(choice<PortGame_MusicCount() && PortGame_MusicAt(choice)!=c.music)choice++;go(MUSIC,100+choice);}
         else if(id==12)go(RULES,0);
         else if(id==13)TagNet_SwitchRole(room.config.party?!claimed():room.role==TN_OBSERVER,-1);
         else if(id==14)ready();
@@ -211,9 +217,9 @@ static void activate(s32 id) {
         if(id==4 && room.host){c.stage=choice;commit(&c);select_room();}
         if(id==6)select_room();
     } else if(page==MUSIC) {
-        if(id>=100){choice=id-100;Bgm_Play(PortGame_MusicFile(choice==24?0:choice));return;}
-        if(id==0 || id==1){choice=Ps_Wrap(choice+(id==0?-8:8),0,24);focus=100+choice;}
-        if(id==4 && room.host){c.music=choice;commit(&c);select_room();}
+        if(id>=100){choice=id-100;Bgm_Play(PortGame_MusicFile(choice==PortGame_MusicCount()?PortGame_MusicAt(0):PortGame_MusicAt(choice)));return;}
+        if(id==0 || id==1){choice=Ps_Wrap(choice+(id==0?-8:8),0,PortGame_MusicCount());focus=100+choice;}
+        if(id==4 && room.host){c.music=PortGame_MusicAt(choice);commit(&c);select_room();}
         if(id==6)select_room();
     } else if(page==RULES) {
         if(id==0 && c.party && c.mode==TL_TOURNAMENT){choice=c.preset;go(PRESETS,100+choice);return;}
@@ -386,7 +392,7 @@ static void lobby(void) {
     }
     load_stage(c->stage);button(10,18,308,145,70,"",1);stage_preview(22,312,137,50);
     name(1,c->stage,label,sizeof(label));text(90,362,label,0.52f,134,2);
-    button(11,174,308,156,29,"Music",1);name(2,c->music,label,sizeof(label));text(252,338,label,0.5f,154,3);
+    button(11,174,308,156,29,"Music",1);music_label(c->music,175,338,154,16,0);
     if(c->party && (c->mode==TL_GAUNTLET || c->mode==TL_TOURNAMENT))button(16,174,353,156,27,c->mode==TL_GAUNTLET?"Choose Gauntlet":"Tournament Type",1);
     button(12,340,308,154,29,"Battle Rules",1);
     button(13,340,347,154,29,c->party?(claimed()?"Release Slot":"Join as Player"):room.role==TN_OBSERVER?"Join as Player":"Spectate",1);
@@ -409,11 +415,11 @@ static void stages(void) {
     button(4,143,365,170,34,"Confirm Stage",room.host);button(6,326,365,100,34,"Back",1);
 }
 static void music(void) {
-    s32 i,start=(choice/8)*8,last=start+8;if(last>25)last=25;
+    s32 i,start=(choice/8)*8,last=start+8;if(last>PortGame_MusicCount()+1)last=PortGame_MusicCount()+1;
     heading("BATTLE MUSIC","SELECT A TRACK TO LISTEN BEFORE THE MATCH");
     load_stage(room.config.stage);plate(20,102,207,210,0,0);stage_preview(25,107,197,172);
-    text(123,286,choice==24?"RANDOM MUSIC":"NOW PLAYING",0.77f,190,1);
-    for(i=start;i<last;i++){name(2,i,label,sizeof(label));button(100+i,242,91+(i-start)*32,250,28,label,1);}
+    text(123,286,choice==PortGame_MusicCount()?"RANDOM MUSIC":"NOW PLAYING",0.77f,190,1);
+    for(i=start;i<last;i++){button(100+i,242,91+(i-start)*32,250,28,"",1);music_label(PortGame_MusicAt(i),250,95+(i-start)*32,234,20,focus==100+i);}
     button(0,242,357,45,28,"<",1);button(1,447,357,45,28,">",1);
     button(4,20,357,142,32,"Confirm Music",room.host);button(6,20,399,142,28,"Back",1);
 }
@@ -552,6 +558,7 @@ void TagOnlineMenu_Open(void) {
     background=(MTexRes *)MPACK_AT(duelArt,1);Res_RelocateOffsets(&background,background,background);
     icons=MPACK_AT(duelArt,24);Res_RelocateOffsets(&icons,icons,icons);IconWin_Init(MPACK_AT(duelArt,23),icons);IconWin_PortHideWords();IconWin_Open();
     selectArt=Sprite_Unpack(MPACK_AT(gMenuArc5,2),NULL,NULL);chipPack=MPACK_AT(selectArt,45);stagePack=MPACK_AT(selectArt,46);
+    for(i=0;i<2;i++){pic=(MTexRes *)MPACK_AT(selectArt,4-i);Res_RelocateOffsets(&pic,pic,pic);musicArt[i]=pic;}
     for(i=0;i<PortGame_CharacterCount();i++)if(PortGame_IsCharacter(i)){pic=(MTexRes *)MPACK_AT(chipPack,i+1);Res_RelocateOffsets(&pic,pic,pic);}
     for(i=0;i<PortGame_StageCount();i++)if(i!=35){pic=(MTexRes *)MPACK_AT(stagePack,i+1);Res_RelocateOffsets(&pic,pic,pic);}
     Pad_SetRepeat(20,5);Bgm_Play(0x10B16+2);ColorFade_StartIn(0,0,0,12);

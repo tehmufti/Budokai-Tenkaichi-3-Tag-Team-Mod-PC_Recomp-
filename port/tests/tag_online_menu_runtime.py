@@ -33,7 +33,7 @@ pad,end,host=cases[a.case]
 out=root/'port/build/tag-online/native-menus'/('bt4' if a.bt4 else 'bt3')/(a.case+'-'+a.window);out.mkdir(parents=True,exist_ok=True)
 shot=out/'screen.ppm';shot.unlink(missing_ok=True)
 env={k:v for k,v in os.environ.items() if not k.startswith('BT3_')}
-env.update(BT3_GS='gpu',BT3_WINDOW=a.window,BT3_FULLSCREEN='0',BT3_TAG_TEAM='1',BT3_TAG_MENU_TEST='main',BT3_MENU_LANG=a.locale,BT3_UPDATE_CHECK='0',BT3_NOSOUND='1',BT3_PACED='1',BT3_SAVES=str(out/'saves'),BT3_SETTINGS=str(out/'settings.txt'),BT3_PAD=pad,BT3_UI_SHOT=f'{end}:{shot}')
+env.update(BT3_GS='gpu',BT3_WINDOW=a.window,BT3_FULLSCREEN='0',BT3_TAG_TEAM='1',BT3_TAG_MENU_TEST='main',BT3_MENU_LANG=a.locale,BT3_UPDATE_CHECK='0',BT3_NOSOUND='1',BT3_PACED='1',BT3_SAVES=str(out/'saves'),BT3_SETTINGS=str(out/'settings.txt'),BT3_PAD=pad,BT3_UI_SHOT=f'{end}:{shot.relative_to(root).as_posix()}')
 if a.case not in ('settings-entry','lobby-entry','modes-bottom','main-back'):env['BT3_TAG_ONLINE']='1'
 if host:env.update(BT3_TAG_HOST='17031',BT3_TAG_TEST_SIZE='5,5')
 if a.case=='lobby-host-settings':env['BT3_TAG_PARTY']='1'

@@ -11,6 +11,7 @@
 #ifdef PORT
 #include "../../port/src/gs/tag_net.h"
 #include "battle/tag_fusion.h"
+#include "battle/btl_scene.h"
 #endif
 
 static BtlCamView nativeViews[TAG_TEAM_CAPACITY];
@@ -836,7 +837,7 @@ extern s32 BtlScene_IsSingleView(void);
 extern void BtlScene_SetSingleView(s32);
 s32 TagOnline_PresentationActor(s32 fallback) { return onlineDrawing?onlineActor:fallback; }
 s32 TagOnline_BeginDraw(void) {
-    s32 actor,chosen,view=0,role=TagNet_Role(),i,t,m;
+    s32 actor,chosen,view=0,role=TagNet_Role(),i,t,m,shared;
     TagNetConfig c;
     if(!TagNet_Active() || !TagTeam_Active())return 0;
     if(role>=0 && role<TN_PLAYERS && !TagNet_Observer())actor=TagTeam_ViewActor(role);
@@ -851,9 +852,15 @@ found:  actor=TagFusion_Owner(actor);
     }
     onlineActor=actor;onlineSavedRandom=gPortRandNext;
     onlineSavedView=nativeViews[0];onlineSavedCurrent=gBtlCam->cur;onlineSavedMatrix=gBtlCamView;
-    onlineSavedActor=nativeSharedActor;onlineSavedSingle=BtlScene_IsSingleView();onlineDrawing=1;
+    onlineSavedActor=nativeSharedActor;onlineSavedSingle=gBtlScene->singleView;onlineDrawing=1;
+    /* One local viewport does not mean a shared cinematic. IsSingleView also
+       returns true for ordinary online gameplay, whose camera belongs to this
+       client. Only an actual camera override may replace that view. */
+    shared=nativeSharedActor>=0 || DemoCam_IsActive();
+    { extern void Port_TagViewTrace(s32,s32,s32,s32,s32,s32,s32);
+      Port_TagViewTrace(role,actor,TagTeam_ControlActor(role),TagTeam_CameraCount(),shared,nativeSharedActor,TagNet_IsPractice()); }
     /* Shared global scenes already have the correct native camera. */
-    if(onlineSavedSingle)nativeViews[0]=*gBtlCam->cur;
+    if(shared)nativeViews[0]=*gBtlCam->cur;
     else {
         for(i=0;i<TagTeam_CameraCount();i++)if(TagTeam_ViewActor(i)==actor){view=i;break;}
         nativeViews[0]=nativeViews[view];
@@ -863,7 +870,7 @@ found:  actor=TagFusion_Owner(actor);
         }
     }
     nativeViews[0].index=0;BtlCam_SelectView(0);nativeSharedActor=actor;
-    if(!onlineSavedSingle) {
+    if(!shared) {
         BtlCam_SetLayout(0,1);
         { extern s32 DemoCam_ApplyFighter(s32,View *,Vec4 *);
           DemoCam_ApplyFighter(TagTeam_CameraActor(actor),&nativeViews[0].view,&nativeViews[0].pos); }

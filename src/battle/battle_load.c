@@ -1612,9 +1612,9 @@ void BattleSetup_SetRule(s32 screenMode, s32 mode, s32 bgm, s32 timeLimit, s32 a
     if (bgm == 24) {
 #ifdef PORT
         /* Use the same unlocked disc/custom tracks as the playlist. */
-        s32 choices[24+PORT_SONG_MAX],n=0,i,bt4=PortGame_IsBT4();
-        for(i=0;i<(bt4?24:20);i++)
-            if(bt4 || (gSaveData->bgmBits&(1u<<i)))choices[n++]=i;
+        s32 choices[256+PORT_SONG_MAX],n=0,i,bt4=PortGame_IsBT4();
+        for(i=0;i<(bt4?PortGame_MusicCount():20);i++)
+            if(bt4 || (gSaveData->bgmBits&(1u<<i)))choices[n++]=PortGame_MusicAt(i);
         if(!bt4)for(i=0;i<gPortSongCount && i<PORT_SONG_MAX;i++)choices[n++]=gPortSongOffsets[i];
         rule->bgm = n?choices[rand()%n]:8;
 #else
