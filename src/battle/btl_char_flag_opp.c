@@ -346,7 +346,9 @@ void BtlOpp_MirrorFlags(BtlFlagChr *chr) {
     if (BtlCharApi_IsInSkill(opp->objId)) {
         BtlChar_SetHeldFlag(chr, 0xB0);
     }
-    if (BtlChar_IsDead(opp)) {
+    /* A fallen ally is a revival target, not a defeated duel opponent. Flag
+       B1 blanks the viewer's entire input record in BtlInput_Fetch. */
+    if (BtlChar_IsDead(opp) && (!TagTeam_Active() || TagTeam_IsEnemy(chr->player,opp->player))) {
         BtlChar_SetHeldFlag(chr, 0xB1);
     }
     if (BtlChar_TestFlag(opp, 0xCC)) {

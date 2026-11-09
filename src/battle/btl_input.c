@@ -990,6 +990,14 @@ s32 BtlInput_TestAction(BtlInputChr *chr, s32 id, s32 want) {
         break;
     case 51:
         result = BtlClash_SequenceActive(chr->player) ? BtlClash_SequenceInput(chr->player) : BtlInput_IsCmdHeld(chr, BTLC_DIR_P);
+#ifdef PORT
+        /* BT4's native clash control is repeated Circle presses. Keep the
+           existing direction input usable for CPU and accessibility input;
+           a held button is never counted again and QTE keeps its own rules. */
+        { extern s32 PortGame_IsBT4(void);
+          if(PortGame_IsBT4() && !BtlClash_SequenceActive(chr->player))
+              result |= BtlInput_IsPressed(chr,BTLB_CIRCLE); }
+#endif
         break;
     case 97:
         result = BtlInput_IsHeld(chr, BTLB_RS_LEFT);

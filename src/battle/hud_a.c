@@ -3,6 +3,7 @@
 #include "battle/battle.h"
 #include "sys/heap.h"
 #ifdef PORT
+#include "plat_game.h"
 #include "battle/tag_options.h"
 #include "sys/file.h"
 #include "sys/loading.h"
@@ -473,6 +474,14 @@ static void Hud_UpdateActor(s32 side,s32 actor,s32 teamPanel) {
         } else if (Port_ClashSquare() && (!Port_NetActive() || Port_NetMe() == side) &&
                    (BtlCtrl_TestFlagE6Pad1(actor) || BtlCtrl_TestFlagE6Pad(actor, &pad))) {
             HudPrompt_SetButton(side, 1, 0); /* icon 1 = Square, style 0 = pressed and released */
+        } else if (PortGame_IsBT4() &&
+                   (BtlCtrl_TestFlagE6Pad1(actor) || BtlCtrl_TestFlagE6Pad(actor, &pad))) {
+            /* Use the same physical Circle icon mapping as the other native
+               prompts, including the selected controller icon style. */
+            extern void *BtlChar_Get(s32);
+            extern s32 BtlCharApi_GetButtonIcon(void *,s32);
+            s32 icon=BtlCharApi_GetButtonIcon(BtlChar_Get(actor),27);
+            if(icon>=0)HudPrompt_SetButton(side,icon&3,icon/4);
 #endif
         } else if (BtlCtrl_TestFlagE6Pad1(actor)) {
             HudPrompt_SetButton(side, 12, 1);

@@ -84,7 +84,7 @@ static void cinematic_pause(void) {
     s32 i,mode=Port_TagOption(TAG_OPT_CINEMATIC_PAUSE),owner;
     u32 participants=0,targetsToPause=0,starters=0,startupPause=0;
     cinematicPaused=0;
-    if(!mode || !BtlSeq_IsFighting()) return;
+    if(!BtlSeq_IsFighting()) return;
     /* Native startup freezes are independent of camera sharing. The target
        stays still during the wind-up, then becomes hittable as it ends.
        Keep simultaneous starters running so reciprocal moves cannot deadlock. */
@@ -94,8 +94,11 @@ static void cinematic_pause(void) {
             s32 target=TagTeam_Target(i);
             starters|=1u<<i;
             if(mode==2)startupPause|=(1u<<count)-1;
-            else if((u32)target<(u32)count)startupPause|=1u<<target;
+            else if(mode==1 && (u32)target<(u32)count)startupPause|=1u<<target;
         }
+        /* A model change may be between its startup flag and its first
+           animation update. Never freeze the actor that must finish loading. */
+        if(BtlCharApi_IsChanging(chr->objId))starters|=1u<<i;
     }
     /* A caught fighter must animate with its grab, rush, or clash owner. */
     participants=starters;
@@ -123,7 +126,12 @@ static void cinematic_pause(void) {
         s32 other=TagTeam_Target(i);
         if((u32)other<(u32)count && (participants&(1u<<other)))participants|=1u<<i;
     }
-    cinematicPaused|=(mode==2?((1u<<count)-1):targetsToPause)&~participants;
+    /* Sharing a transformation takes away everyone else's view. Keep them
+       safe even when ordinary special startups are set to keep moving. */
+    if(BtlCharApi_IsChanging(BattleSide_GetObjId(owner)))
+        cinematicPaused|=((1u<<count)-1)&~participants;
+    else if(mode)
+        cinematicPaused|=(mode==2?((1u<<count)-1):targetsToPause)&~participants;
 }
 /* Reject both collision discovery and already-queued contacts. The latter
    matters when a lower-index fighter establishes a grab earlier this frame. */

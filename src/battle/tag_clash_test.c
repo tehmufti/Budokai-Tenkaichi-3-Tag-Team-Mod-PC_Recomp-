@@ -5,6 +5,8 @@
 #include "battle/btl_char_flag.h"
 #include "battle/tag_options.h"
 #include "battle/btl_cam.h"
+#include "battle/btl_input.h"
+#include "plat_game.h"
 extern BtlFlagChr *BtlChar_Get(s32);
 extern void BtlAct_Request(BtlFlagChr *,s32), BtlAct_ClearQueue(BtlFlagChr *);
 extern s32 BtlAct_GetCurrent(BtlFlagChr *);
@@ -23,6 +25,18 @@ static void camera_options(s32 actor,s32 option,s32 check) {
     Port_TagTestCheck(!TagTeam_ShareClashCamera(actor) && BtlCam_GetPriorityView()<0,check+1);
     Port_TagOptionSet(option,old);
 }
+static void clash_input(void) {
+    BtlInputChr *c=(BtlInputChr *)BtlChar_Get(0);
+    BtlCharInput saved=c->input;
+    if(BtlClash_SequenceActive(0))return;
+    c->input.cmdHeld=0;c->input.pressed=BTLB_CIRCLE;c->input.held=BTLB_CIRCLE;
+    Port_TagTestCheck(!!BtlInput_TestAction(c,51,1)==!!PortGame_IsBT4(),75);
+    c->input.pressed=0;
+    Port_TagTestCheck(!BtlInput_TestAction(c,51,1),76);
+    c->input.cmdHeld=BTLC_DIR_P;
+    Port_TagTestCheck(BtlInput_TestAction(c,51,1),77);
+    c->input=saved;
+}
 void TagClash_TestTick(s32 tick) {
     s32 i;
     extern void Port_TagClashTrace(s32,s32,s32,s32,s32);
@@ -33,6 +47,7 @@ void TagClash_TestTick(s32 tick) {
     }
     if(tick==30) { start(0,3,0x61); start(2,1,0x61); }
     if(tick==40) {
+        clash_input();
         camera_options(0,TAG_OPT_SHARED_MELEE,65);
         Port_TagTestCheck(BtlClash_State(0)==7 && BtlClash_State(2)==7,41);
         Port_TagTestCheck(TagTeam_Target(0)==3 && TagTeam_Target(3)==0,42);

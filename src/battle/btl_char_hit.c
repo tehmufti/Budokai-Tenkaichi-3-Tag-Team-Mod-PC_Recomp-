@@ -344,7 +344,7 @@ static inline s32 BtlHit_FormIndex(s32 n, HitGauge *g) {
     return n * 2 + (g->variant != 0);
 }
 
-/* Attacker flags 0x4C / 0x4D (direction 0 / 1): a grab attempt within 100 units. Fails against flag 0x42, a form
+/* Attacker flags 0x4C / 0x4D (skill slot 0 / 1): Solar Flare within 100 units. Fails against flag 0x42, a form
  * whose parameter bit (0x1000000 << form) is set, flag 0x137, or from behind (animation flag 0x800: when 0x8000 is
  * set). On success fills the defender's reaction block (reaction 9, or 0xE with animation flag 0x800). */
 s32 BtlHit_CheckGrab(HitChr *a, HitChr *b) {
@@ -1022,15 +1022,30 @@ void BtlHit_CheckProximityAll(void) {
     s32 j;
 
     for (i = 0; i < BtlChar_GetCount(); i++) {
+        HitChr *a = BtlChar_Get(i);
+        s32 flare = BtlChar_TestFlag(a,0x4D)?0x4D:BtlChar_TestFlag(a,0x4C)?0x4C:0;
+        /* The skill's exit raises a held request while its last startup pause
+           is still active. Do not let an unpaused bystander consume it before
+           the selected target can react. The request survives until released. */
+        s32 flareReady=flare && !TagTeam_CinematicPaused(i) &&
+            !TagTeam_CinematicPaused(TagTeam_Target(i));
         for (j = 0; j < BtlChar_GetCount(); j++) {
             if (TagTeam_IsEnemy(i, j) && TagTeam_CanContact(i,j)) {
-                HitChr *a = BtlChar_Get(i);
                 HitChr *b = BtlChar_Get(j);
 
                 BtlHit_CheckNear(a, b);
-                BtlHit_CheckGrab(a, b);
+                /* The native check consumes its request. Restore it for each
+                   enemy, preserving native range, facing and immunity rules. */
+                if(flareReady) {
+                    BtlChar_SetHeldFlag(a,flare);
+                    BtlHit_CheckGrab(a, b);
+                }
                 BtlHit_CheckTouch(a, b);
             }
+        }
+        if(flareReady) {
+            BtlChar_ClearFlag(a,0x4C);
+            BtlChar_ClearFlag(a,0x4D);
         }
     }
 }

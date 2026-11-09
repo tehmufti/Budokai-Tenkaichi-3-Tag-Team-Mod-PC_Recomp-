@@ -51,10 +51,70 @@ static void melee_contact_test(s32 tick,s32 kind) {
         Port_TagTestCheck(1,99);
     }
 }
+/* Real Solar Flare and transformations under every pause/camera combination. */
+static void pause_regression(s32 tick,s32 kind) {
+    extern s32 BtlSkill_GetId(BtlActJChr *,s32);
+    extern BtlMgrMember *BtlMember_GetActive(BtlMgrChr *);
+    extern f32 BtlCharApi_GetBlindRatio(s32);
+    static s32 original,seen[4],completed,settled,sharedFrames;
+    s32 i,solar=kind<=21,mode=solar?kind-19:(kind-22)%3,shared=kind>=25;
+    BtlMgrChr *a=BtlChar_Get(0);
+    if(tick==30) {
+        original=BtlMember_GetActive(a)->chara;
+        Port_TagOptionSet(TAG_OPT_CINEMATIC_PAUSE,mode);
+        Port_TagOptionSet(TAG_OPT_SHARED_TRANSFORM,shared);
+        Port_TagOptionSet(TAG_OPT_SHARED_SPECIAL,0);
+        for(i=0;i<4;i++) {
+            BtlMgrChr *c=BtlChar_Get(i);StgGroundHit floor;
+            Vec4 p={i==2?300.0f:0,0,i==1?40.0f:i==3?60.0f:0,1};
+            Vec4 r={0,i==1||i==3?3.14159265f:0,0,0};
+            p.y=BtlStage_GetTop()+1;BtlStage_ProbeGround(-1,&p,&floor);p.y=floor.y;
+            BtlAct_ClearQueue(c);BtlAct_Request(c,0xB);
+            BtlChar_Place(c,&p,&r,BtlStage_FindZoneNear(-1,&p));
+            c->freeze=c->freezeNext=c->freezeDelay=0;
+            BtlMember_GetActiveGauge(c)->blast=BtlMember_GetActiveGauge(c)->blastMax;
+            BtlMember_GetActiveGauge(c)->health=100000;
+        }
+        while(TagTeam_Target(0)!=3)TagTeam_CycleTarget(0);
+    }
+    if(tick==40) {
+        if(solar) {
+            s32 slot=BtlSkill_GetId((BtlActJChr *)a,0)==1?0:1;
+            Port_TagTestCheck(BtlSkill_GetId((BtlActJChr *)a,slot)==1,2400);
+            BtlAct_Request(a,BtlAct_GetSkillAction((BtlActJChr *)a,slot));
+        } else {
+            Port_TagTestCheck(BtlAct_CanTransform((BtlActJChr *)a,0,1,1),2410);
+            Port_TagTestCheck(BtlAct_QueueTransform((BtlActJChr *)a,0),2411);
+            BtlAct_Request(a,BtlAct_GetQueued(a));
+        }
+    }
+    if(tick>40) {
+        for(i=0;i<4;i++)if(BtlCharApi_GetBlindRatio(BtlChar_Get(i)->objId)>0)seen[i]++;
+        if(!solar) {
+            extern s32 BtlCharApi_IsChanging(s32);
+            if(BtlCharApi_IsChanging(a->objId)) {
+                Port_TagTestCheck(!TagTeam_CinematicPaused(0),2412);
+                if(shared && BtlCam_GetPriorityView()==0) {
+                    if(++sharedFrames>2)for(i=1;i<4;i++)Port_TagTestCheck(TagTeam_CinematicPaused(i),2413);
+                }
+            }
+            if(BtlMember_GetActive(a)->chara!=original && !BtlCharApi_IsChanging(a->objId))completed=1;
+        } else if(tick>100 && a->action<0xFD)completed=1;
+        if(completed && !BtlChar_IsFrozen(a))settled++;else settled=0;
+        if(tick%30==0)Port_TagSpecialTrace(tick,mode,TagTeam_CinematicPaused(0),BtlMember_GetActive(a)->chara,a->action);
+        if(settled==45) {
+            if(solar) {Port_TagSpecialTrace(tick,seen[0],seen[1],seen[2],seen[3]);Port_TagTestCheck(seen[1]>0&&seen[3]>0,2401);Port_TagTestCheck(!seen[0]&&!seen[2],2402);}
+            for(i=0;i<4;i++)Port_TagTestCheck(!TagTeam_CinematicPaused(i),2414);
+            Port_TagTestCheck(1,99);
+        }
+    }
+    if(tick==1500)Port_TagTestCheck(0,2419);
+}
 void TagSpecial_TestTick(s32 tick) {
     static s32 startup,paused,damage,settled,targetPaused;
     s32 i,kind=Port_TagCinemaTest(),shared=kind==6||kind==7;
     BtlMgrChr *a=BtlChar_Get(0);
+    if(kind>=19 && kind<=27){pause_regression(tick,kind);return;}
     if(kind>=16 && kind<=18){melee_contact_test(tick,kind);return;}
     if(tick==30) {
         Port_TagOptionSet(TAG_OPT_LOCAL_CINEMATICS,1);
@@ -142,3 +202,4 @@ void TagSpecial_TestTick(s32 tick) {
     }
     if(tick==1200) Port_TagTestCheck(0,681);
 }
+

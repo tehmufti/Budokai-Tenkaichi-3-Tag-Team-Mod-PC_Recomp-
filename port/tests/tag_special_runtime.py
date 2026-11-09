@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[2]
-CASES={4:"beam",5:"rush",6:"shared-beam",7:"ultimate",8:"pause-off",9:"two-beams",14:"pause-target",15:"pause-everyone",16:"melee-contact",17:"melee-locked-only",18:"melee-crowd"}
+CASES={4:"beam",5:"rush",6:"shared-beam",7:"ultimate",8:"pause-off",9:"two-beams",14:"pause-target",15:"pause-everyone",16:"melee-contact",17:"melee-locked-only",18:"melee-crowd",19:"solar-flare-unpaused",20:"solar-flare-target",21:"solar-flare-everyone",22:"transform-unshared-unpaused",23:"transform-unshared-target",24:"transform-unshared-everyone",25:"transform-shared-unpaused",26:"transform-shared-target",27:"transform-shared-everyone"}
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -27,6 +27,7 @@ def main():
                    BT3_SAVES=str(out/"saves"),BT3_UPDATE_CHECK="0",SDL_AUDIO_DRIVER="dummy")
         if args.data:env["BT3_DATA"]=str(args.data.resolve())
         if args.character is not None:env["BT3_TAG_SPECIAL_CHARACTER"]=str(args.character)
+        elif kind>=19:env["BT3_TAG_SPECIAL_CHARACTER"]="0" if kind<=21 else "3"
         if args.slot is not None:env["BT3_TAG_SPECIAL_SLOT"]=str(args.slot)
         if args.shot:
             shot=(out/"frame.ppm").relative_to(ROOT).as_posix()
