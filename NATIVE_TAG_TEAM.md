@@ -96,6 +96,34 @@ across the arena, with terrain clearance and space between fighters. Tournament
 stages keep those starting points inside the ring. Triangle goes back, and Select at the
 main menu returns to normal modes.
 
+**Team Battle with three to five teams.** After **Team Battle** the menu asks
+**How many teams?**: 2, 3, 4 or 5 Teams. **2 Teams** is the Team Battle
+described above, unchanged. With three to five teams the team setup screen has
+one column per team, in the team's colour. A team's **Fighters** card sets its
+size: one to five fighters, ten in the whole match. Left/Right on a player card
+moves that player to the next team that still has a fighter without a player.
+The character screen then holds exactly the planned fighters: a marker above
+every slot names its team and its owner (`T1 P1`, `T3 CPU`), and **End** is
+refused until a row is complete. Players are the first fighters of their team.
+When the sizes cannot be put on the two rows of five without parting a team,
+one team stands on both rows; in the fight that changes nothing.
+
+In the match every team starts at its own base around the middle of the arena,
+and everybody outside your team is an opponent. The last team with a fighter
+standing wins. At time over the team that kept the largest share of its total
+health wins: a fallen fighter counts as none of its full health, and equal
+shares go to the lower team number. Health meters and markers use five team
+colours and a banner names the winning team. Teammates revive one another and
+a fallen player can take over a living CPU teammate, as with two teams.
+Fusion with a teammate, beam assists and the optional Outnumbered assistance
+work inside each team as well; Outnumbered compares a team with the largest
+team it faces.
+Fight Again and Character Select keep the teams; the main menu and a new mode
+start from two teams again. One to four local players can play with any number
+of teams. Free For All, Training, Gauntlet and World Tournament are unchanged.
+The Online Lobby offers the same choice to its host (see
+[Native Tag Team Online](NATIVE_TAG_ONLINE.md)).
+
 The battle modes also offer **CPU Only**. Choose both rosters normally, then
 watch their fight. The team setup screen includes **Duel Time** (60, 90, 180,
 240 seconds or no limit) and **COM Level** (Very Weak through Very Strong).
@@ -332,6 +360,38 @@ resume, music continuing during pause, stopping one actor without stopping the
 others, and battle voice cleanup. Automated audio runs use SDL's silent dummy
 device; they are not a subjective listening comparison.
 
+Team Battle with three to five teams has been run on Windows and Linux as CPU
+matches from a test switch (`BT3_TAG_TEAMS=3,3,3`, one number per team):
+knock-out matches of 1-1-1, 2-2-2, 3-3-3, 5-3-2, 4-4-1-1 and 2-2-2-2-2, time
+over with and without fallen fighters, and the starting places of three, four
+and five teams on all 35 BT3 stages, including a rematch.
+`port/tests/tag_squad_runtime.py` checks in each of these matches that every
+fighter is on the team its slot was given, that every target is on another
+team and that the result names the right team. A 2-2-2 match was also run on
+BT3 Europe, BT3 Japan and BT4 English. `port/tests/tag_squad.c` is a host test
+of the rule that places the teams on the two roster rows, over all 552 allowed
+team sizes. The menu route (teams page, team setup, character select, match,
+Fight Again, Character Select, Main Menu) is scripted in
+`port/tests/tag_menu_runtime.py` on BT3 USA, and its three-team route on
+Europe, Japan and BT4 English and Spanish. With two teams the fight is, blank
+by blank, the one the previous build played (fixed CPU demos of 1v1, 2v2, 4v2
+and 5v5). These are automated runs; people have not yet played these matches.
+
+A timed fusion whose separation was interrupted in the very update that asked
+for it used to stay fused for the rest of the match, with its meter gone. The
+expiry is now watched: the power-down is asked again when it gets lost, and
+once it is ten seconds overdue it no longer waits for a quiet moment. The
+fault was reproduced with a test switch (`BT3_TAG_TEST_DEFUSE_BREAK`) and the
+fix checked with Gogeta and Gotenks on BT3 (Windows and Linux) and on BT4
+English.
+
+When the game must stop because a fixed capacity is used up (the display list
+of a frame, effect memory, the file request queue), it now writes
+`bt3_crash.txt` in the game folder on Windows and Linux: the reason in words,
+what was wanted, in use and available, the highest use of each of the three
+during that battle, and a backtrace. Attach that file to a report. In CPU
+matches of up to ten fighters none of the three came near its limit.
+
 Frame exports and test logs are local build output
 under `port/build/`, not redistributable game assets.
 
@@ -340,6 +400,7 @@ under `port/build/`, not redistributable game assets.
 | Area | Status |
 | --- | --- |
 | Simultaneous team combat | Up to five fighters per side, including unequal teams and free-for-all. Native character selection determines the actual roster. |
+| Three to five teams | Team Battle only, offline and in the Online Lobby: one to five fighters per team, ten in the match, revival and takeover as with two teams (see Playing for what is switched off). Checked by automated matches and scripted menus, not yet by people playing. |
 | Human controls | One to four independent pads/keyboards, configurable teams, 2/3/4 views. Native menus select the roster and each player's assignment. |
 | Menus | Select toggles Modded Modes at the main menu. Setup and settings use native menu artwork; characters and stages use native selection. Return-to-menu routing retains the modded session. More human playtesting is still needed. |
 | HUD | Original game health, ki, portrait, stock, combo and skill panels per view, plus target markers, revival and fusion indicators. Optional teammate/player labels leave room for native move names and counters. Revival captions and meters stay inside their viewport. |

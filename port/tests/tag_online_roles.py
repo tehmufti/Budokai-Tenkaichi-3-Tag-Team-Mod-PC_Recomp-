@@ -1,5 +1,6 @@
 """Real native host: ten player seats, ten spectators, and lobby role changes."""
 import argparse
+import json
 import os
 import pathlib
 import re
@@ -12,13 +13,16 @@ p=argparse.ArgumentParser()
 p.add_argument('--port',type=int,default=17015)
 p.add_argument('--gpu',action='store_true')
 p.add_argument('--window',default='800x600')
+p.add_argument('--exe',type=pathlib.Path,help='Native executable to exercise')
+p.add_argument('--data',type=pathlib.Path,help='Imported BT4 disc folder')
 a=p.parse_args()
 root=pathlib.Path(__file__).resolve().parents[2]
+exe=(a.exe or root/'port/build/bt3.exe').resolve()
 out=root/'port/build/tag-online/room-roles'
 out.mkdir(parents=True,exist_ok=True)
 env={k:v for k,v in os.environ.items() if not k.startswith('BT3_')}
 env.update(BT3_TAG_TEAM='1',BT3_TAG_ONLINE='1',BT3_TAG_HOST=str(a.port),
-           BT3_DATA=str(root/'gamedata-bt4'),BT3_UPDATE_CHECK='0',BT3_NOSOUND='1',
+           BT3_DATA=str((a.data or root/'gamedata-bt4').resolve()),BT3_UPDATE_CHECK='0',BT3_NOSOUND='1',BT3_GS='none',
            BT3_SAVES=str(out/'saves'),BT3_SETTINGS=str(out/'settings.txt'))
 if a.gpu:
     shot=out/('room-'+a.window+'.ppm')
@@ -27,7 +31,9 @@ if a.gpu:
                BT3_UI_SHOT_MS='7000:'+str(shot))
 logpath=out/'host.log'
 log=logpath.open('w')
-process=subprocess.Popen([str(root/'port/build/bt3.exe')],cwd=root,env=env,stdout=log,stderr=log)
+process=subprocess.Popen([str(exe)],cwd=root,env=env,stdout=log,stderr=log)
+# The hello this program expects: the protocol number of its own source tree and the identity written into it at link time.
+protocol=int(re.search(r'PROTOCOL=(\d+)',(exe.parents[2]/'port/src/gs/tag_net.c').read_text(errors='replace')).group(1))
 clients=[]
 
 class Client:
@@ -35,9 +41,9 @@ class Client:
         self.s=socket.create_connection(('127.0.0.1',a.port),timeout=5)
         self.buf=b'';self.c=None;self.ready=[];self.role=None;self.notice=None;self.rejected=None
         self.closed=False;self.s.setblocking(False);clients.append(self)
-        self.send(1,struct.pack('!9I',0x544e4554,4,1,identity>>32,
+        self.send(1,struct.pack('!10I',0x544e4554,protocol,1,identity>>32,
                   (identity&0xffffffff)^int(bad),1 if playing else 2,
-                  data_identity>>32,data_identity&0xffffffff,0))
+                  data_identity>>32,data_identity&0xffffffff,0,1))
     def send(self,kind,data=b''):
         self.s.sendall(struct.pack('!II',len(data)+8,kind)+data)
     def pump(self):
@@ -87,9 +93,8 @@ try:
         assert process.poll() is None and time.monotonic()<end
         time.sleep(.1)
     data_identity=int(re.search(r'BT4 resources ([0-9a-f]+)',logpath.read_text()).group(1),16)
-    identity=14695981039346656037
-    for byte in (root/'port/build/bt3.exe').read_bytes():identity=((identity^byte)*1099511628211)&0xffffffffffffffff
-    bad=Client(True,True);wait(lambda:bad.rejected is not None);assert b'does not match' in bad.rejected;bad.close()
+    identity=int(json.loads((exe.parent/'obj_win64/tag-net-build.json').read_text())['identity'][:16],16)
+    bad=Client(True,True);wait(lambda:bad.rejected is not None);assert b'builds differ' in bad.rejected;bad.close()
     players=[join(True) for _ in range(9)]
     wait(lambda:all(c.c[0]==players[-1].c[0] for c in players))
     assert [c.role for c in players]==list(range(1,10))

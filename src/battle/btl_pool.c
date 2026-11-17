@@ -15,9 +15,15 @@ extern s32 gBtlPoolInitArg;
 #ifdef PORT
 /* Host allocations keep effect pools independent. The original bump arenas
  * silently overwrite the next pool when more than two fighters create tasks. */
-typedef struct NativePoolBlock { struct NativePoolBlock *next; } NativePoolBlock;
+typedef struct NativePoolBlock { struct NativePoolBlock *next; s32 size; } NativePoolBlock;
 static NativePoolBlock *nativeBlocks[BTL_POOL_SLOT_COUNT];
 static s32 nativePools;
+/* Bytes and blocks held by all slots: what a capacity report and the trace's high-water marks say. */
+static s32 nativeBytes, nativeCount;
+extern void Port_TagCapacityFatal(const char *message, s32 wanted, s32 used, s32 capacity);
+extern void Port_TagMark(s32 kind, s32 value, s32 limit);
+extern s32 Port_TagOverrunTest(s32 kind);
+extern u32 Port_LowRegionSize(void);
 extern unsigned Port_GameBigAlloc(s32 size);
 extern s32 Port_GameBigFree(unsigned ptr);
 extern void Port_TagTeamFatal(const char *message);
@@ -41,6 +47,7 @@ void BtlPool_Init(s32 arg) {
        Use independent allocations in every native battle, not just tag mode. */
     nativePools = 1;
     memset(nativeBlocks, 0, sizeof(nativeBlocks));
+    nativeBytes = nativeCount = 0;
     if (nativePools) gBtlPool->arenaMask = 0;
 #endif
     size = BtlPool_CalcArenaSize();
@@ -73,10 +80,15 @@ void *BtlPool_Alloc(s32 slot, s32 size) {
     if (nativePools) {
         NativePoolBlock *block;
         if ((u32)slot >= BTL_POOL_SLOT_COUNT || size < 0) Port_TagTeamFatal("invalid effect pool allocation");
-        block = (NativePoolBlock *)Port_GameBigAlloc(size + 64);
-        if (!block) Port_TagTeamFatal("native effect memory exhausted");
+        block = Port_TagOverrunTest(2) ? NULL : (NativePoolBlock *)Port_GameBigAlloc(size + 64);
+        if (!block) Port_TagCapacityFatal("native effect memory exhausted", size, nativeBytes, (s32)Port_LowRegionSize());
         block->next = nativeBlocks[slot];
+        block->size = size;
         nativeBlocks[slot] = block;
+        nativeBytes += size;
+        nativeCount++;
+        Port_TagMark(1, nativeBytes, (s32)Port_LowRegionSize());
+        Port_TagMark(2, nativeCount, 0);
         return (u8 *)block + 64;
     }
 #endif
@@ -104,7 +116,13 @@ void BtlPool_Free(s32 slot, void *ptr) {
         at = &nativeBlocks[slot];
         while (*at) {
             NativePoolBlock *block = *at;
-            if ((u8 *)block + 64 == ptr) { *at = block->next; Port_GameBigFree((u32)block); return; }
+            if ((u8 *)block + 64 == ptr) {
+                *at = block->next;
+                nativeBytes -= block->size;
+                nativeCount--;
+                Port_GameBigFree((u32)block);
+                return;
+            }
             at = &block->next;
         }
         return;
@@ -125,6 +143,8 @@ void BtlPool_Reset(s32 slot) {
         while (nativeBlocks[slot]) {
             NativePoolBlock *block = nativeBlocks[slot];
             nativeBlocks[slot] = block->next;
+            nativeBytes -= block->size;
+            nativeCount--;
             Port_GameBigFree((u32)block);
         }
         return;

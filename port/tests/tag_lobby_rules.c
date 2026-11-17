@@ -153,8 +153,75 @@ static void tournament(void) {
     for(i=0;i<8;i++)d.team[i]=0;
     assert(TlTournament_Build(&t,&d)==TL_INVALID);
 }
+/* The room rule of Team Battle (TlTeams_Valid), the order it wants (TlTeams_Arrange) and the room's own
+   arranging (TagNet_ArrangeTeams), which carries every fighter's record with its team. */
+static void set_teams(TagNetConfig *c,int teams,int first,int count,const char *digits) {
+    int i;memset(c,0,sizeof(*c));c->party=1;c->mode=TL_TEAM;c->lobby.draft.teams=teams;c->size[0]=first;c->size[1]=count-first;
+    for(i=0;i<count;i++){c->lobby.draft.team[i]=digits[i]-'1';c->chara[i]=100+i;c->owner[i]=i==0?0:-1;c->cpuLevel[i]=i%5;c->items[i][3]=200+i;}
+}
+static int rule(const TagNetConfig *c) {return TlTeams_Valid(c->lobby.draft.teams,c->size[0]+c->size[1],c->size[0],c->lobby.draft.team);}
+static void team_rooms(void) {
+    TagNetConfig c,d;TlRoom r=full_room();TlDraft draft;int i,k,teams,sizes[5],checked=0,rows[2],order[10],at;
+    /* two teams: the team is the column, one to five fighters each */
+    set_teams(&c,2,5,10,"1111122222");assert(rule(&c) && !TagNet_TeamRoom(&c));
+    set_teams(&c,2,3,5,"11122");assert(rule(&c));
+    set_teams(&c,2,3,5,"11222");assert(!rule(&c));
+    set_teams(&c,2,3,5,"11212");assert(!rule(&c));
+    set_teams(&c,2,5,5,"11111");assert(!rule(&c));
+    set_teams(&c,0,5,10,"1111122222");assert(!rule(&c));
+    set_teams(&c,1,5,10,"1111122222");assert(!rule(&c));
+    set_teams(&c,6,5,10,"1111122222");assert(!rule(&c));
+    /* three to five teams: the rooms the host builds (two fighters each) */
+    set_teams(&c,3,2,6,"112233");assert(rule(&c) && TagNet_TeamRoom(&c));
+    set_teams(&c,4,4,8,"11223344");assert(rule(&c));
+    set_teams(&c,5,5,10,"1122533445");assert(rule(&c));
+    c.practice=1;assert(!TagNet_TeamRoom(&c));c.practice=0;c.mode=TL_FFA;assert(!TagNet_TeamRoom(&c));
+    /* refused: a team out of range, an empty team, six on a team, another order than the layout's, other rows */
+    set_teams(&c,3,2,6,"112234");assert(!rule(&c));
+    set_teams(&c,3,2,6,"112222");assert(!rule(&c));
+    set_teams(&c,3,5,10,"1111112233");assert(!rule(&c));
+    set_teams(&c,3,2,6,"113322");assert(!rule(&c));
+    set_teams(&c,3,3,6,"112233");assert(!rule(&c));
+    set_teams(&c,3,2,6,"121233");assert(!rule(&c));
+    set_teams(&c,3,2,6,"112233");c.lobby.draft.team[5]=-1;assert(!rule(&c));
+    /* every allowed size vector: slots in any order arrange into a room the rule accepts, each fighter keeps
+       its record, and a team's fighters keep their order */
+    for(teams=3;teams<=5;teams++)for(k=0;k<(teams==3?125:teams==4?625:3125);k++) {
+        int total=0,n=0,v=k;char digits[11];
+        for(i=0;i<5;i++){sizes[i]=i<teams?v%5+1:0;v/=5;total+=sizes[i];}
+        if(total>10)continue;
+        /* the fighters dealt round-robin: the teams interleaved, far from the layout's order */
+        {int left[5];for(i=0;i<5;i++)left[i]=sizes[i];while(n<total)for(i=0;i<teams;i++)if(left[i]){left[i]--;digits[n++]=(char)('1'+i);}}
+        set_teams(&c,teams,total>5?5:total-1,total,digits);d=c;
+        assert(TlTeams_Arrange(teams,total,c.lobby.draft.team,rows,order));
+        at=TagNet_ArrangeTeams(&c,total-1);
+        assert(at>=0 && rule(&c) && c.size[0]==rows[0] && c.size[1]==rows[1] && c.chara[at]==100+total-1);
+        for(i=0;i<total;i++) {
+            int from=c.chara[i]-100;
+            assert(from==order[i] && c.lobby.draft.team[i]==d.lobby.draft.team[from] && c.cpuLevel[i]==d.cpuLevel[from] && c.items[i][3]==d.items[from][3] && c.owner[i]==d.owner[from]);
+            if(i && c.lobby.draft.team[i]==c.lobby.draft.team[i-1])assert(c.chara[i]>c.chara[i-1]);
+        }
+        d=c;assert(TagNet_ArrangeTeams(&d,0)==0 && !memcmp(&d,&c,sizeof(c)));
+        checked++;
+    }
+    assert(checked==527); /* (552 size vectors of two to five teams, less the 25 of two teams) */
+    /* a change that would empty a team or put six on one leaves the room untouched */
+    set_teams(&c,3,2,6,"112233");c.lobby.draft.team[4]=0;c.lobby.draft.team[5]=0;d=c;assert(TagNet_ArrangeTeams(&c,0)<0 && !memcmp(&d,&c,sizeof(c)));
+    set_teams(&c,3,5,10,"1111122233");c.lobby.draft.team[5]=0;d=c;assert(TagNet_ArrangeTeams(&c,0)<0 && !memcmp(&d,&c,sizeof(c)));
+    /* a member moves: 2-2-2, the second fighter of team 1 goes to team 3 */
+    set_teams(&c,3,2,6,"112233");c.owner[1]=4;c.lobby.draft.team[1]=2;at=TagNet_ArrangeTeams(&c,1);
+    assert(at>=0 && rule(&c) && c.owner[at]==4 && c.lobby.draft.team[at]==2 && c.size[0]+c.size[1]==6);
+    /* the draft rule of the room record uses the same rule */
+    draft=team_draft(&r);assert(TlDraft_Valid(&r,&draft));
+    draft.team[4]=1;draft.team[5]=0;assert(!TlDraft_Valid(&r,&draft));
+    draft=team_draft(&r);draft.teams=5;for(i=0;i<10;i++)draft.team[i]="0011422334"[i]-'0';assert(TlDraft_Valid(&r,&draft));
+    draft.team[4]=3;assert(!TlDraft_Valid(&r,&draft));
+    draft=team_draft(&r);draft.teams=6;assert(!TlDraft_Valid(&r,&draft));
+    printf("team rooms: %d size vectors of three to five teams arranged and accepted\n",checked);
+}
 int main(void) {
     TagNetConfig c={0};
+    team_rooms();
     c.chara[2]=31;c.costume[2]=3;c.owner[2]=7;c.cpuLevel[2]=4;c.items[2][6]=120;c.lobby.draft.team[2]=3;
     TagNet_CopyFighter(&c,1,2);
     assert(c.chara[1]==31 && c.costume[1]==3 && c.owner[1]==7 && c.cpuLevel[1]==4 && c.items[1][6]==120 && c.lobby.draft.team[1]==3);

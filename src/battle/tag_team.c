@@ -22,6 +22,7 @@
 #include "battle/tag_cpu.h"
 #include "battle/tag_position.h"
 #include "battle/tag_view_layout.h"
+#include "battle/tag_squad.h"
 #include "sys/pad.h"
 #include "sys/save.h"
 #include "../../port/src/gs/tag_net.h"
@@ -52,6 +53,23 @@ static s32 stickPending[TAG_TEAM_CAPACITY],stickR3[TAG_TEAM_CAPACITY];
 static s32 pressAttacker[TAG_TEAM_CAPACITY],tapTarget[TAG_TEAM_CAPACITY],tapLife[TAG_TEAM_CAPACITY];
 static s32 viewCount = 1;
 static s32 assignment[TAG_TEAM_CAPACITY], assigned, winningTeam=-1;
+/* Three to five teams (Team Battle only): 2 in every other match, and then
+   none of the code that asks TagTeam_TeamCount() runs. */
+static s32 squadTeams=2,winningActor=-1;
+/* Three or more teams: the native result's side that won. 0 shows the winner
+   (a player is on the winning team, or nobody plays), 1 shows the player who
+   lost, as the duel does when the CPU wins. */
+static s32 winningSide;
+/* What a match of three or more teams offers. An entry is 1 once its
+   fixture (BT3_TAG_TEST_SQUAD) has passed with a third team and with the
+   team that stands on both roster rows. */
+static const s8 squadFeatures[TAG_FEATURE_COUNT]={
+    1, /* TAG_FEATURE_REVIVE */
+    1, /* TAG_FEATURE_TAKEOVER */
+    1, /* TAG_FEATURE_FUSION */
+    1, /* TAG_FEATURE_ASSIST */
+    1, /* TAG_FEATURE_OUTNUMBERED */
+};
 static s32 grabPartner[TAG_TEAM_CAPACITY],grabOwner[TAG_TEAM_CAPACITY];
 static u32 cinematicPaused;
 static s32 grab_other(s32 actor),rush_other(s32 actor);
@@ -79,6 +97,12 @@ void TagTeam_GrabContact(s32 attacker,s32 victim) {
 s32 TagTeam_CinematicPaused(s32 actor) {
     return TagTeam_Active() && (u32)actor<(u32)count &&
         (TagFusion_Hidden(actor) || TagLobby_Hidden(actor) || TagLobby_Editing(actor) || TagChallenge_ModelHidden(actor) || BtlSeq_WaveIntroPaused(actor) || (cinematicPaused&(1u<<actor))!=0);
+}
+/* A grab or rush sequence owns both of its fighters until it lets go. */
+s32 TagTeam_Paired(s32 actor) {
+    return TagTeam_Active() && (u32)actor<(u32)count &&
+        (grab_other(actor)>=0 || rush_other(actor)>=0 ||
+         BtlCharApi_IsInRushSequence(BattleSide_GetObjId(actor)));
 }
 static void cinematic_pause(void) {
     s32 i,mode=Port_TagOption(TAG_OPT_CINEMATIC_PAUSE),owner;
@@ -241,6 +265,11 @@ void TagTeam_Enable(s32 on) { enabled = on != 0; }
 s32 TagTeam_Enabled(void) { return enabled; }
 s32 TagTeam_Active(void) { return count >= 2; }
 s32 TagTeam_Count(void) { return count >= 2 ? count : 2; }
+s32 TagTeam_TeamCount(void) { return count >= 2 ? squadTeams : 2; }
+s32 TagTeam_WinningTeam(void) { return count >= 2 ? winningTeam : -1; }
+s32 TagTeam_Feature(s32 feature) {
+    return TagTeam_TeamCount()<3 || ((u32)feature<TAG_FEATURE_COUNT && squadFeatures[feature]);
+}
 
 BattleSide *TagTeam_Side(s32 fighter) {
     if (TagTeam_Active() && (u32)fighter < (u32)count) return &sides[fighter];
@@ -261,7 +290,7 @@ s32 TagTeam_IsEnemy(s32 a, s32 b) {
 }
 s32 TagTeam_RingOutEnabled(void) { return !TagLobby_Practice() && TagSession_Mode()!=TAG_MODE_TRAINING && Port_TagOption(TAG_OPT_RING_OUT); }
 s32 TagTeam_TransformFrequency(void) { return Port_TagOption(TAG_OPT_CPU_TRANSFORM); }
-s32 TagTeam_FusionsEnabled(void) { return Port_TagOption(TAG_OPT_FUSIONS); }
+s32 TagTeam_FusionsEnabled(void) { return Port_TagOption(TAG_OPT_FUSIONS) && TagTeam_Feature(TAG_FEATURE_FUSION); }
 s32 TagTeam_ShareClashCamera(s32 actor) {
     s32 state=BtlClash_State(actor);
     BtlMgrChr *chr=BtlChar_Get(actor);
@@ -359,7 +388,8 @@ void TagTeam_Begin(void) {
             if (member > 0) dst->control = BTL_CONTROL_CPU;
             /* CPU input is generated per fighter; the pad preference still
              * comes from its team's original controller, not an invalid port. */
-            teams[slot] = TagSession_Mode()==TAG_MODE_FREE_FOR_ALL ? slot : team;
+            teams[slot] = TagSession_Mode()==TAG_MODE_FREE_FOR_ALL ? slot :
+                TagSession_Teams()>=3 ? TagSession_SlotTeam(team,index) : team;
             nativeSides[slot]=team;
             slot++;
         }
@@ -369,6 +399,7 @@ void TagTeam_Begin(void) {
         wantedPlayers=TN_PLAYERS;wantedViews=1;
     }
     count = slot;
+    squadTeams = TagSession_Mode()==TAG_MODE_FREE_FOR_ALL || TagLobby_Practice() ? 2 : TagSession_Teams();
     viewCount = TagNet_Active()?wantedViews:wantedViews > count ? count : wantedViews;
     for (slot = 0; slot < count; slot++) {
         s32 actor = slot;
@@ -386,6 +417,7 @@ void TagTeam_Begin(void) {
       extern void TagFusion_TestAssign(s32);
       if(Port_TagFusionTest()==1 || Port_TagFusionTest()==3) TagFusion_TestAssign(wantedPlayers);
     }
+    { extern void TagTeam_TestSeats(s32); TagTeam_TestSeats(wantedPlayers); }
     if(assigned && !TagNet_Active() && !TagLobby_Practice()) {
         s32 n=wantedPlayers;
         for(slot=0;slot<count;slot++) {
@@ -397,7 +429,12 @@ void TagTeam_Begin(void) {
     TagTeam_Reset();
 }
 
-void TagTeam_End(void) { extern void Port_TagHudClear(void); count = 0; Port_TagHudClear(); }
+void TagTeam_End(void) {
+    extern void Port_TagHudClear(void);
+    extern void Port_TagMarksReport(s32);
+    Port_TagMarksReport(count);
+    count = 0; Port_TagHudClear();
+}
 
 /* Reproducible roster launch using the real loader and CPU controllers. */
 void TagTeam_SetupDemo(s32 human, s32 team0, s32 team1) {
@@ -408,6 +445,25 @@ void TagTeam_SetupDemo(s32 human, s32 team0, s32 team1) {
     s32 team;
     s32 member;
     s32 sizes[2];
+    { extern s32 Port_TagTeamsTest(s32);
+      s32 n=Port_TagTeamsTest(-1),t;
+      if(n>=3) {
+          /* BT3_TAG_TEAMS: three to five teams. The session lays them out
+             on the two rows, exactly as the menus will. */
+          TagSession_Setup(TAG_MODE_TEAM,human?wantedPlayers:0);
+          TagSession_SetTeams(n);
+          for(t=0;t<n;t++) TagSession_SetTeamSize(t,1);
+          for(t=0;t<n;t++) TagSession_SetTeamSize(t,Port_TagTeamsTest(t));
+          TagSession_Commit();
+          team0=TagSession_Size(0);team1=TagSession_Size(1);
+          if(Port_TagTeamsTest(6)>0) {
+              /* A shorter match for the knock-out checks: every fighter
+                 starts with this share of its health. */
+              volatile s32 percent=Port_TagTeamsTest(6);
+              setup->sides[0].members[0].health=setup->sides[1].members[0].health=percent;
+          }
+      }
+    }
     sizes[0] = team0; sizes[1] = team1;
     for (team = 0; team < 2; team++) {
         BattleSide *side = &setup->sides[team];
@@ -448,9 +504,22 @@ void TagTeam_SetupDemo(s32 human, s32 team0, s32 team1) {
             setup->sides[0].members[0].costume=setup->sides[0].members[1].costume=0;
         }
     }
+    { extern s32 Port_TagTestCast(s32);
+      /* BT3_TAG_TEST_CAST: single fighters by their number in the match
+         (member 0 of row 0, member 0 of row 1, member 1 of row 0, ...). */
+      s32 fighter=0;
+      for(member=0;member<BTL_MEMBER_MAX;member++) for(team=0;team<2;team++) if(member<sizes[team]) {
+          if(Port_TagTestCast(fighter)>=0) {
+              setup->sides[team].members[member].chara=Port_TagTestCast(fighter);
+              setup->sides[team].members[member].costume=0;
+          }
+          fighter++;
+      }
+    }
     {
         extern s32 Port_TagSpawnTest(void);
-        if(Port_TagSpawnTest()) {
+        extern s32 Port_TagTeamsTest(s32);
+        if(Port_TagSpawnTest() && Port_TagTeamsTest(-1)<3) {
             TagSession_Setup(TAG_MODE_FREE_FOR_ALL,human?wantedPlayers:0);
             TagSession_Commit();
         }
@@ -487,12 +556,18 @@ void TagTeam_SetupDemo(s32 human, s32 team0, s32 team1) {
     }
     TagLobby_TestSetup();
     BattleSetup_Finish();
+    { extern s32 Port_TagTeamsTest(s32);
+      /* BT3_TAG_TEAMS_TIME, after the mode fix-ups: the demo mode forces
+         its own short limit there. */
+      if(Port_TagTeamsTest(-1)>=3 && Port_TagTeamsTest(5)>=0) setup->rule.timeLimit=Port_TagTeamsTest(5);
+    }
 }
 
 void TagTeam_Reset(void) {
     s32 i, j;
     traceFrame = 0;
-    winningTeam=-1;
+    winningTeam=winningActor=-1;
+    winningSide=0;
     cinematicPaused=0;
     { extern void TagRevive_Reset(void); TagRevive_Reset(); }
     TagFusion_Reset();
@@ -557,6 +632,7 @@ static s32 targetable(s32 i, s32 other) {
     if (i==other || TagFusion_Hidden(other) || TagChallenge_Hidden(other)) return 0;
     if (TagTeam_IsEnemy(i,other)) return alive(other);
     return TagSession_Mode()!=TAG_MODE_FREE_FOR_ALL && TagTeam_InputPlayer(i)>=0 && Port_TagOption(TAG_OPT_REVIVE) &&
+        TagTeam_Feature(TAG_FEATURE_REVIVE) &&
         BtlMember_GetActiveGauge(BtlChar_Get(other))->health<=0 && !BtlChar_TestFlag(BtlChar_Get(other),7);
 }
 
@@ -771,7 +847,8 @@ void TagTeam_CycleSpectator(s32 view) {
 }
 s32 TagTeam_TakeoverCandidate(s32 player) {
     s32 actor, i;
-    if (!TagTeam_Active() || TagLobby_Practice() || (u32)player>=(u32)wantedPlayers || !Port_TagOption(TAG_OPT_TAKEOVER)) return -1;
+    if (!TagTeam_Active() || TagLobby_Practice() || (u32)player>=(u32)wantedPlayers || !Port_TagOption(TAG_OPT_TAKEOVER) ||
+        !TagTeam_Feature(TAG_FEATURE_TAKEOVER)) return -1;
     actor=controlActors[player];
     if(actor<0)return -1;
     if(TagFusion_Hidden(actor)) return -1;
@@ -814,6 +891,14 @@ s32 TagTeam_Takeover(s32 player) {
 
 s32 TagTeam_WinningActor(s32 team) {
     s32 i;
+    /* Three or more teams: the winning team's representative stands on its
+     * presentation side, a fighter of another team on the other one. */
+    if(TagTeam_Active() && squadTeams>=3 && winningActor>=0) {
+        if(team==winningSide) return winningActor;
+        /* (the other side: a player's fighter that lost, else any fighter of another team) */
+        for(i=0;i<count;i++) if(teams[i]!=winningTeam && players[i]>=0) return i;
+        for(i=0;i<count;i++) if(teams[i]!=winningTeam) return i;
+    }
     /* Native results have two presentation sides. A free-for-all winner can
      * occupy any actor slot; map those presentation sides to real fighters. */
     if(TagTeam_Active() && TagSession_Mode()==TAG_MODE_FREE_FOR_ALL && winningTeam>=0) {
@@ -884,8 +969,14 @@ void TagTeam_Update(void) {
         if(!spectatorChosen[i]) {
             if(candidate>=0) viewActors[i]=candidate;
             else if(!alive(viewActors[i])) {
-                s32 n;
-                for(n=1;n<=count;n++) {
+                s32 n,found=0;
+                /* With several enemy teams the next living fighter by
+                   number can be anybody: look for a teammate first. */
+                if(squadTeams>=3 && actor>=0) for(n=1;n<=count && !found;n++) {
+                    s32 next=(viewActors[i]+n)%count;
+                    if(alive(next) && !TagTeam_IsEnemy(actor,next)) {viewActors[i]=next;found=1;}
+                }
+                if(!found) for(n=1;n<=count;n++) {
                     s32 next=(viewActors[i]+n)%count;
                     if(alive(next)) {viewActors[i]=next;break;}
                 }
@@ -909,6 +1000,55 @@ void TagTeam_Update(void) {
     }
 }
 
+/* Three or more teams. Knock-out: the match goes on while two teams have a
+ * living fighter. Time over: the team that kept the largest share of its
+ * full health wins, every fighter of the team counted (a fallen one adds
+ * nothing to the health and all of its maximum); equal shares go to the
+ * lower team number. A fused body stands for both of its fighters with
+ * their own maximum health, as a separation would give it back to them.
+ * Nobody alive is a draw. */
+static s32 check_end_squads(s32 timeUp) {
+    extern void Port_TagDecidedTrace(s32,s32,s32,s32,s32);
+    extern s32 TagFusion_PairMax(s32);
+    BattleResult *result = Battle_GetResult();
+    s32 live[TAG_SQUAD_TEAMS] = {0}, hp[TAG_SQUAD_TEAMS] = {0}, full[TAG_SQUAD_TEAMS] = {0};
+    s32 i, t, remaining=0, best=-1;
+    for (i = 0; i < count; i++) {
+        BtlMgrGauge *g=BtlMember_GetActiveGauge(BtlChar_Get(i));
+        s32 health=alive(i)?g->health:0, max=g->healthMax, pair=TagFusion_PairMax(i);
+        t=teams[i];
+        if((u32)t>=TAG_SQUAD_TEAMS || TagFusion_Hidden(i)) continue; /* (a hidden partner is in the fused body) */
+        if(pair>0 && max>0) {
+            health=(s32)((long long)health*pair/max);
+            max=pair;
+        }
+        if(alive(i)) live[t]++;
+        hp[t]+=health; full[t]+=max;
+    }
+    for(t=0;t<TAG_SQUAD_TEAMS;t++) if(live[t]) {
+        remaining++;
+        if(best<0 || (long long)hp[t]*full[best] > (long long)hp[best]*full[t]) best=t;
+    }
+    if (!timeUp && remaining>1) return 0;
+    winningTeam=best;
+    winningActor=-1;
+    /* The team is represented by a living fighter, a player's if it has one. */
+    for(i=0;i<count && best>=0;i++) if(teams[i]==best && alive(i)) {
+        if(winningActor<0) winningActor=i;
+        if(TagTeam_InputPlayer(i)>=0) {winningActor=i;break;}
+    }
+    for(t=0;t<squadTeams;t++) Port_TagDecidedTrace(1,t,hp[t],full[t],live[t]);
+    Port_TagDecidedTrace(0,timeUp!=0,best,winningActor,squadTeams);
+    result->reason = timeUp ? BTL_REASON_TIME_UP : BTL_REASON_KO;
+    {
+        s32 played=0,won=0;
+        for(i=0;i<count;i++) if(players[i]>=0) {played=1;if(teams[i]==best) won=1;}
+        winningSide=played && !won;
+    }
+    result->winner = winningActor<0 ? BTL_RESULT_DRAW : winningSide ? BTL_RESULT_WIN_P2 : BTL_RESULT_WIN_P1;
+    return 1;
+}
+
 /* Called by the real battle sequence after its clock advances. A lost lead
  * does not end a team battle while another member is still fighting. */
 s32 TagTeam_CheckEnd(s32 timeUp) {
@@ -916,6 +1056,7 @@ s32 TagTeam_CheckEnd(s32 timeUp) {
     s32 live[TAG_TEAM_CAPACITY] = {0}, hp[TAG_TEAM_CAPACITY] = {0};
     s32 i, remaining=0, best=-1, tied=0;
     if(TagLobby_Practice())return 0;
+    if(squadTeams>=3) return check_end_squads(timeUp);
     if(TagSession_Mode()==TAG_MODE_TRAINING && !timeUp) return 0;
     for (i = 0; i < count; i++) {
         if (alive(i)) {

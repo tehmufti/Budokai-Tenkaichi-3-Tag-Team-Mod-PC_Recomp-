@@ -31,18 +31,28 @@ extern f32 BtlCharApi_GetRadius(s32),BtlStage_GetInnerRadius(void);
 extern f32 BtlStage_GetTop(void),BtlStage_GetBottom(void);
 extern s32 BtlStage_FindZoneNear(s32,Vec4 *),BtlStage_ProbeGround(s32,Vec4 *,StgGroundHit *);
 extern f32 sinf(f32),cosf(f32),sqrtf(f32);
+extern void BtlAct_SetQueue(BtlMgrChr *,u32,s32);
+extern s32 BtlAct_GetRequested(BtlMgrChr *);
+extern s32 Port_TagDefuseBreak(s32);
+extern void Port_TagFusionTrace(s32,s32,s32,s32,s32,s32,s32);
 
 typedef struct TagFusion {
     s32 state,partner,result,dance,ticks,request,index,wait,authorized,age;
     s32 duration,controller,controlTicks,controlInterval;
+    s32 overdue,forced;
     BtlMgrMember before,other;
 } TagFusion;
 static TagFusion fusions[TAG_TEAM_CAPACITY];
 static s32 hiddenBy[TAG_TEAM_CAPACITY];
+static s32 testBroken;
+/* Updates a timed fusion may stay at zero before its separation stops
+   waiting for the neutral action: ten seconds. */
+#define DEFUSE_FORCE_TICKS 300
 
 void TagFusion_Reset(void) {
     s32 i;
     memset(fusions,0,sizeof(fusions));
+    testBroken=0;
     for(i=0;i<TAG_TEAM_CAPACITY;i++) {
         hiddenBy[i]=-1;
         fusions[i].partner=fusions[i].request=-1;
@@ -62,6 +72,15 @@ s32 TagFusion_Owner(s32 actor) { return TagFusion_Hidden(actor)?hiddenBy[actor]:
 s32 TagFusion_SharedBody(s32 actor) {
     s32 owner=TagFusion_Owner(actor);
     return (u32)owner<(u32)TagTeam_Count() && fusions[owner].state>=2?owner:-1;
+}
+/* Time over with several teams: a fused body stands for both of its
+   fighters. Their own maximum health was saved when they fused. 0 for a
+   fighter that is not a fused body. */
+s32 TagFusion_PairMax(s32 actor) {
+    TagFusion *f;
+    if(!TagTeam_Active() || (u32)actor>=(u32)TagTeam_Count()) return 0;
+    f=&fusions[actor];
+    return f->state>=2?f->before.gauge.healthMax+f->other.gauge.healthMax:0;
 }
 s32 TagFusion_Seconds(s32 actor) {
     if((u32)actor>=(u32)TagTeam_Count()) return -1;
@@ -105,7 +124,7 @@ static s32 available(s32 actor) {
 s32 TagFusion_Find(s32 actor,s32 index) {
     s32 i,k;
     BtlMgrChr *c=BtlChar_Get(actor);
-    if(!Port_TagOption(TAG_OPT_FUSIONS) || (u32)index>=3 || fusions[actor].state ||
+    if(!TagTeam_FusionsEnabled() || (u32)index>=3 || fusions[actor].state ||
         TagFusion_Hidden(actor) || !TagTeam_IsAlive(actor)) return -1;
     for(i=0;i<TagTeam_Count();i++) if(i!=actor && !TagTeam_IsEnemy(actor,i) && available(i)) {
         BtlMgrMember *m=BtlMember_GetActive(BtlChar_Get(i));
@@ -138,6 +157,7 @@ s32 TagFusion_Prepare(s32 actor,s32 index,s32 partner) {
     f->controlInterval=Port_TagOption(TAG_OPT_FUSION_SWAP_SECONDS);
     f->controlTicks=f->controlInterval*30;
     f->state=1;f->wait=0;f->request=-1;f->authorized=0;f->age=0;
+    f->overdue=f->forced=0;
     /* Native fusion expects a reserve-member record for stats/equipment. It
        is not added to memberCount, so switching cannot summon a duplicate. */
     c->members[1]=f->other;
@@ -205,7 +225,9 @@ void TagFusion_ModelLoaded(s32 actor) {
         f->state=2;f->age=0;
         TagTeam_RefreshControl(actor);
     }
-    else if(f->state==3 && m->chara==f->before.chara) {
+    /* An expired fusion that went back to waiting (state 2 at zero) still
+       separates if a power-down that was already under way delivers. */
+    else if((f->state==3 || (f->state==2 && f->dance && !f->ticks)) && m->chara==f->before.chara) {
         BtlMgrMember *p=BtlMember_GetActive(BtlChar_Get(f->partner));
         f32 ratio=m->gauge.healthMax>0?(f32)m->gauge.health/m->gauge.healthMax:0.0f;
         s32 ki=m->gauge.ki,stocks=m->gauge.blast;
@@ -226,16 +248,51 @@ void TagFusion_ModelLoaded(s32 actor) {
         f->state=4;
     }
 }
-static void begin_defusion(s32 actor,TagFusion *f) {
+static void defusion_form(s32 actor,TagFusion *f) {
     BtlActJChr *c=(BtlActJChr *)BtlChar_Get(actor);
     BtlActJForm *form=&c->form;
     form->index=-1;form->chara=f->before.chara;form->costume=f->before.costume;
     form->cost=0;form->kind=3;form->variant=f->before.gauge.unk20;
     form->animChara=form->unk1C=form->voiceChara=form->chara;
     form->unk24=-1;form->unk28=0;form->partner=-1;form->unk30=0;
-    f->state=3;
+}
+/* A grab, rush, clash, technique or authored camera owns this fighter. */
+static s32 in_scene(s32 actor,BtlMgrChr *c) {
+    return TagTeam_CinematicPaused(actor) || TagTeam_Paired(actor) || BtlClash_Opponent(actor)>=0 ||
+        BtlCharApi_IsInTechnique(c->objId) ||
+        BtlCharApi_HasCamPriority(BattleSide_GetObjId(TagTeam_CameraActor(actor)));
+}
+/* The power-down is one request for the next action dispatch. The fighter's
+   own decision or a reaction of the same update can replace it, so state 3
+   is watched in TagFusion_Update. */
+static void begin_defusion(s32 actor,TagFusion *f) {
+    BtlActJChr *c=(BtlActJChr *)BtlChar_Get(actor);
+    defusion_form(actor,f);
+    f->state=3;f->age=0;
     BtlAct_ClearQueue((BtlMgrChr *)c);
     BtlAct_Request((BtlMgrChr *)c,0xEE);
+    Port_TagFusionTrace(BtlSeq_GetClock()->ticks,actor,f->forced?3:1,f->state,f->ticks,BtlAct_GetCurrent((BtlMgrChr *)c),f->overdue);
+    if(Port_TagDefuseBreak(0) && (Port_TagDefuseBreak(1)<0 || testBroken<Port_TagDefuseBreak(1))) {
+        /* Test switch: this update also brings a pad press or another queued action. */
+        testBroken++;
+        if(Port_TagDefuseBreak(0)==1 && f->controller>=0) gPad[f->controller].held|=PAD_SQUARE;
+        else BtlAct_SetQueue((BtlMgrChr *)c,0,0xC);
+    }
+}
+/* An overdue separation is asserted after the fighter's own decision of
+   this update (the action dispatcher asks here), with its form request
+   written again: a queued transformation uses the same record. A forced
+   reaction can still replace it; the watch then tries again. */
+s32 TagFusion_PendingAction(s32 actor) {
+    TagFusion *f;
+    BtlMgrChr *c;
+    if(!TagTeam_Active() || (u32)actor>=(u32)TagTeam_Count()) return -1;
+    f=&fusions[actor];
+    if(f->state!=3 || !f->forced) return -1;
+    c=BtlChar_Get(actor);
+    if(BtlAct_GetCurrent(c)==0xEE || BtlCharApi_IsChanging(c->objId)) return -1;
+    defusion_form(actor,f);
+    return 0xEE;
 }
 void TagFusion_Update(void) {
     s32 i;
@@ -247,7 +304,7 @@ void TagFusion_Update(void) {
         if(f->wait>0) {
             s32 player=TagTeam_Player(f->request),partner;
             f->wait--;
-            if(!Port_TagOption(TAG_OPT_FUSIONS) || !TagTeam_IsAlive(i) || !available(f->request))
+            if(!TagTeam_FusionsEnabled() || !TagTeam_IsAlive(i) || !available(f->request))
                 f->wait=0;
             else if(player>=0 && (gPad[player].pressed&PAD_R3) &&
                     BtlAct_CanFuse((BtlActJChr *)c,f->index,1,1,&partner) &&
@@ -262,6 +319,19 @@ void TagFusion_Update(void) {
             /* A queued move can be interrupted before it ever starts. */
             hiddenBy[f->partner]=-1;BtlChar_ClearFlag(BtlChar_Get(f->partner),0xB);
             memset(&c->members[1],0,sizeof(c->members[1]));f->state=0;
+        }
+        if(f->state==3) {
+            /* Like the start of a fusion: a request that did not become
+               the action (and is no longer pending) was replaced. Go back
+               to the expired timed state, which asks again. */
+            if(BtlAct_GetCurrent(c)==0xEE || BtlCharApi_IsChanging(c->objId)) f->age=0;
+            else if(BtlAct_GetRequested(c)!=0xEE) {
+                if(f->overdue<DEFUSE_FORCE_TICKS) f->overdue++;
+                if(++f->age>2) {
+                    f->state=2;f->ticks=0;
+                    Port_TagFusionTrace(BtlSeq_GetClock()->ticks,i,2,f->state,f->ticks,BtlAct_GetCurrent(c),f->overdue);
+                }
+            }
         }
         if(f->state==2) {
             s32 interval=Port_TagOption(TAG_OPT_FUSION_SWAP_SECONDS),next=TagFusion_NextController(i);
@@ -288,15 +358,27 @@ void TagFusion_Update(void) {
         if(f->state==2 && f->dance && Port_TagOption(TAG_OPT_TIMED_FUSIONS) &&
             TagTeam_IsAlive(i) && !BtlChar_IsFrozen(c) && !BtlCharApi_IsChanging(c->objId)) {
             if(f->ticks>0) f->ticks--;
-            if(f->ticks==0 && BtlAct_GetCurrent(c)==0xB) begin_defusion(i,f);
+            if(f->ticks==0) {
+                /* The request waits for the neutral action. Ten seconds
+                   late it only waits for a scene that owns this fighter. */
+                s32 late=f->overdue>=DEFUSE_FORCE_TICKS;
+                if(!late) f->overdue++;
+                if(BtlAct_GetCurrent(c)==0xB || (late && !in_scene(i,c))) {
+                    f->forced=late;
+                    begin_defusion(i,f);
+                }
+            }
         }
+        if(f->state>=2 && BtlSeq_GetClock()->ticks%30==0)
+            Port_TagFusionTrace(BtlSeq_GetClock()->ticks,i,0,f->state,f->ticks,BtlAct_GetCurrent(c),f->overdue);
         if(f->state==4 && !BtlCharApi_IsChanging(c->objId)) {
             BtlMgrChr *p=BtlChar_Get(f->partner);
             separate(i,f);
             hiddenBy[f->partner]=-1;BtlChar_ClearFlag(p,0xB);
             p->freeze=p->freezeNext=p->freezeDelay=0;
             BtlAct_ClearQueue(p);BtlAct_Request(p,0xB);
-            f->state=0;
+            Port_TagFusionTrace(BtlSeq_GetClock()->ticks,i,4,f->state,f->ticks,BtlAct_GetCurrent(c),f->overdue);
+            f->state=0;f->overdue=f->forced=0;
             TagTeam_RefreshControl(i);
             TagTeam_RefreshControl(f->partner);
         }

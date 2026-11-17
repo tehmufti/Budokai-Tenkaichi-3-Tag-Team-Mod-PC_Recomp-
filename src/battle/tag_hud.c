@@ -61,6 +61,7 @@ void TagTeam_AfterUpdate(void) {
     memset(&s, 0, sizeof(s));
     if (!TagTeam_Active() || TagLobby_LocalMenu()) { Port_TagHudSubmit((u32)&s); return; }
     s.active = 1; s.count = TagTeam_Count(); s.views = TagTeam_ViewCount();
+    s.teamCount = TagTeam_TeamCount(); s.winnerTeam = s.teamCount >= 3 ? TagTeam_WinningTeam() : -1;
     s.shared = BtlScene_IsSingleView();
     s.paused = (Battle_GetWork()->flags & BATTLE_FLAG_PAUSE) != 0;
     s.shown = !s.paused && BtlSeq_IsFighting() && (gHud->flags & HUD_SHOW_GAUGES) &&

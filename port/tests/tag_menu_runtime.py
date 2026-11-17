@@ -223,15 +223,272 @@ for loss in (False, True):
         }
 
 
-def run(case, exe, renderer, data=None):
+# ---- Team Battle with three to five teams ------------------------------------------------------------------------
+# Team Battle asks "How many teams?" before Players. The older Team Battle cases answer "2 Teams" at frame 240,
+# between two of their own presses, so everything after it happens at the frame it always did.
+TEAMS_PAGE=101
+def team_route(pad):
+    head="150:select,210:cross,"
+    return head+"240:cross,"+pad[len(head):] if pad.startswith(head) else pad
+
+# The one older route that is longer now: Players' Back leads to the teams page, and that one to Modded Modes.
+CASES["back"]=dict(CASES["back"],pad=CASES["back"]["pad"]+",980:triangle",after=980,
+    states=[(4,2),(4,3),(40,0),(4,3),(4,2),(4,TEAMS_PAGE),(4,1),(4,0)])
+
+
+class Script:
+    """Presses of up to four pads on one clock (the game holds every press for four frames)."""
+    def __init__(self,start=150):
+        self.t=start;self.events={1:[],2:[],3:[],4:[]};self.shots={}
+    def press(self,key,gap=60,pad=1,times=1):
+        for _ in range(times):
+            self.events[pad].append(f"{self.t}:{key}");self.t+=gap
+        return self
+    def wait(self,frames):
+        self.t+=frames;return self
+    def shot(self,label):
+        """A picture just before the next press (taken with --shots)."""
+        self.shots[self.t-6]=label;return self
+    def env(self):
+        keys={1:"BT3_PAD",2:"BT3_PAD_2",3:"BT3_PAD_3",4:"BT3_PAD_4"}
+        return {keys[n]:",".join(e) for n,e in self.events.items() if e}
+
+
+def squad_setup(teams,players):
+    """Modded Modes > Team Battle > <teams> Teams > <players> players (0: CPU Only): TEAM SETUP is open."""
+    s=Script().press("select").press("cross",30)
+    s.press("down",20,times=teams-2).wait(10).press("cross",30)
+    return s.press("down",20,times=4 if players==0 else players-1).wait(10).press("cross",90)
+
+def squad_edit(s,moves,change):
+    """TEAM SETUP: `moves` (directions) bring the focus to a card; Cross edits it, `change` presses right (left
+    when negative), Cross saves."""
+    for key in moves.split(): s.press(key,30)
+    return s.press("cross",30).press("right" if change>0 else "left",30,times=abs(change)).press("cross",30)
+
+def squad_pick(s,rows,owners,bt4):
+    """Character select with planned rows: another fighter in every slot. owners[row][slot] is the pad that picks
+    it (None: a CPU's slot, picked by pad 1, with the difficulty prompt). The cursor is on End by itself once
+    the row is full, so End is one Cross."""
+    for r,count in enumerate(rows):
+        for m in range(count):
+            pad=owners[r][m] or 1
+            if m:
+                s.press("cross",60,pad)                      # open the next free slot
+                if not bt4: s.press("right",60,pad,times=(0,1,2,4,5)[m])
+            # (row 2 starts one column to the right: its third and fifth fighters open the form picker first;
+            #  on BT4 the first grid cell always has one, and the same fighter may be picked again)
+            s.press("cross",60,pad,times=4 if bt4 or (r==1 and m in (2,4)) else 3)
+            if owners[r][m] is None: s.press("cross",60)     # CPU difficulty
+            s.shot(f"selector-row{r+1}-slot{m+1}")
+        s.press("cross",60)                                  # End
+    return s.wait(20).press("cross",60)                      # the stage
+
+def squad_layout(size):
+    """include/battle/tag_squad.h once more: the two rows of team numbers, and the team of every fighter of the
+    match (fighters are numbered across the rows: slot 1 of row 1, slot 1 of row 2, slot 2 of row 1, ...)."""
+    import itertools
+    teams,total,best,split,head=len(size),sum(size),None,None,0
+    for n in range(1,teams+1):
+        for row0 in itertools.combinations(range(teams),n):
+            a=sum(size[t] for t in row0)
+            if row0[0]!=0 or a>5 or not 1<=total-a<=5: continue
+            key=(abs(2*a-total),list(row0))
+            if best is None or key<best: best=key
+    if best is None:
+        for s in range(teams-1,0,-1):
+            for n in range(1,teams):
+                for row0 in itertools.combinations([t for t in range(teams) if t!=s],n):
+                    k=5-sum(size[t] for t in row0)
+                    if row0[0]!=0 or not 1<=k<=size[s]-1: continue
+                    if best is None or list(row0)<best[1]: best,head=(0,list(row0)),k
+            if best is not None:
+                split=s;break
+    rows=[[],[]]
+    for t in range(teams):
+        if t!=split: rows[0 if t in best[1] else 1]+=[t]*size[t]
+    if split is not None:
+        rows[0]+=[split]*head;rows[1]+=[split]*(size[split]-head)
+    return rows,[rows[r][m] for m in range(5) for r in range(2) if m<len(rows[r])]
+
+def squad_owners(rows,player_team):
+    """Players take the first fighters of their team, row 1 before row 2 (pads 1..4 here; None is a CPU)."""
+    owners=[[None]*len(row) for row in rows]
+    for p,team in enumerate(player_team):
+        r,m=next((r,m) for r in range(2) for m in range(len(rows[r])) if rows[r][m]==team and owners[r][m] is None)
+        owners[r][m]=p+1
+    return owners
+
+def squad_result(s,row):
+    """The result menu of a match BT3_TAG_TEST_RESULT has ended: Fight Again, Character Select or Main Menu
+    (row 0..2), then Yes."""
+    s.wait(2200).shot("result").press("down",40,times=row).wait(100-40*row).press("cross",100).press("up",100)
+    return s.press("cross",100)
+
+def squad_case(size,player_team,setup=None,then=None,settings="",env=None,**more):
+    """A match of len(size) teams from the menus. `setup` edits TEAM SETUP: it must leave the sizes `size` and
+    the players on the teams `player_team`; `then` goes on once the stage is chosen."""
+    rows,teams=squad_layout(list(size))
+    owners=squad_owners(rows,player_team)
+    def build(bt4):
+        s=squad_setup(len(size),len(player_team))
+        if setup: setup(s)
+        s.wait(30).shot("setup").press("start",150)
+        squad_pick(s,[len(rows[0]),len(rows[1])],owners,bt4)
+        if then: then(s,bt4)
+        return s
+    case=dict(build=build,squad=tuple(size),players=tuple(player_team),rows=rows,teams=teams,owners=owners,fights=1,
+              end=rf"tagteam frame=150 fighter={len(teams)-1} ",after=0,
+              states=[(4,1),(4,TEAMS_PAGE),(4,2),(4,3),(40,0),(40,1)],settings="tag_extra_intros=0\n"+settings,
+              env=dict({"BT3_TAG_DEBUG":"1","BT3_UNCAPPED":"1"},**(env or {})))
+    case.update(more)
+    return case
+
+def check_squad(spec,text):
+    size,rows,teams,owners=spec["squad"],spec["rows"],spec["teams"],spec["owners"]
+    # what TEAM SETUP left in the session when the match was set up (page 46): the teams, their fighters, the two
+    # rows, the players' teams
+    before=text.split("page=46 state=")[0]
+    plans=[tuple(map(int,m.split(","))) for m in re.findall(r"page=44 state=([\d,]+)",before)]
+    packed=int("".join(str(size[t]) if t<len(size) else "0" for t in range(5)))
+    assert plans and plans[-1]==(len(size),packed,len(rows[0]),len(rows[1]),len(spec["players"])),plans
+    seats=[tuple(map(int,m.split(","))) for m in re.findall(r"page=45 state=([\d,]+)",before)]
+    now=seats[-1][:len(spec["players"])] if seats else tuple(p%len(size) for p in range(len(spec["players"])))
+    assert now==spec["players"],seats
+    # the markers above the slots of the character select: team and owner of every slot
+    marks={}
+    for side,member,mark in re.findall(r"page=41 state=(\d),(\d),(\d+),",text):
+        if int(mark): marks[(int(side),int(member))]=int(mark)
+    want={(r,m):1+(owners[r][m] or 0)+10*(rows[r][m]+1) for r in range(2) for m in range(len(rows[r]))}
+    assert marks==want,(marks,want)
+    # hand-over: the pad that picks goes to every player who owns a slot (pad 1 picks for the CPUs)
+    selectors={int(n) for n in re.findall(r"page=40 state=\d+,\d+,-?\d+,\d+,(\d+)",text)}
+    assert selectors=={0}|set(range(len(spec["players"]))),selectors
+    # what the match was given: fighter, owner (-1 a CPU), team
+    slots=[(r,m) for m in range(5) for r in range(2) if m<len(rows[r])]
+    assigned={int(a):(int(o),int(t)) for a,o,t in re.findall(r"page=42 state=(\d+),(-?\d+),(\d+),",text)}
+    assert assigned=={a:((owners[r][m] or 0)-1,rows[r][m]) for a,(r,m) in enumerate(slots)},assigned
+    # every fight: each fighter on its planned team; until the decision the players' fighters are theirs and
+    # everybody else is a CPU
+    fights=[]
+    for actor,team in re.findall(r"tagteam frame=150 fighter=(\d+) chara=\d+ team=(\d+)",text):
+        if int(actor)==0: fights.append({})
+        fights[-1][int(actor)]=int(team)
+    assert len(fights)==spec["fights"] and all(f==dict(enumerate(teams)) for f in fights),(fights,teams)
+    human={a for a,(r,m) in enumerate(slots) if owners[r][m]}
+    controls={(int(a),c!="2") for a,c in re.findall(r"tagteam control fighter=(\d+) control=(\d+)",text.split("tagdecided")[0])}
+    assert controls=={(a,a in human) for a in range(len(teams))},controls
+
+
+CASES["teams3-match"]=squad_case((2,2,2),(0,))
+CASES["teams5-cpu"]=squad_case((2,2,2,2,2),())
+# Two players on one team of four: P2 leaves team 2 for team 1 (P2's card is the one to the right of P1's).
+CASES["teams4-pair"]=squad_case((2,2,2,2),(0,0),setup=lambda s:squad_edit(s,"right",-1))
+
+def uneven_setup(s):
+    squad_edit(s,"up right",-1)      # team 2: one fighter
+    squad_edit(s,"right",1)          # team 3: three fighters
+    squad_edit(s,"down",2)           # P1: to team 2, then to team 3
+# Teams of 2, 1 and 3 with the player on team 3, which the test switch lets win; then each row of the result menu.
+def uneven_case(then,**more):
+    return squad_case((2,1,3),(2,),setup=uneven_setup,env={"BT3_TAG_TEST_RESULT":"3"},then=then,timeout=200,**more)
+# Fight Again: the same six fighters on the same teams once more.
+CASES["teams3-retry"]=uneven_case(lambda s,bt4:squad_result(s,0),result=0,fights=2,end=r"page=92 state=6,\d+,0,2,3")
+CASES["teams3-retry"]["states"]+=[(90,0),(92,6)]
+def characters_again(s,bt4):
+    """Character Select: the rows come back as they were played. End both, choose the stage, fight again."""
+    squad_result(s,1)
+    s.wait(200).shot("selector-again")
+    for _ in range(2):
+        # (a row opens on its first slot's grid: Triangle shows the row, Left goes to End)
+        s.press("triangle",60).press("left",60).shot("selector-again-end").press("cross",90)
+    return s.wait(20).press("cross",60)
+CASES["teams3-characters"]=uneven_case(characters_again,result=1,fights=2,end=r"page=92 state=6,\d+,0,2,3")
+CASES["teams3-characters"]["states"]+=[(90,0),(40,0),(40,1),(92,6)]
+def main_again(s,bt4):
+    """Main Menu: Modded Modes again. Team Battle with two teams, then with three: both start from nothing."""
+    squad_result(s,2)
+    s.wait(300).press("cross",30).press("cross",30).press("cross",90).shot("setup-two-teams-after")   # 2 Teams, One Player
+    s.press("triangle").press("triangle").press("down",30).press("cross",30).press("cross",90).shot("setup-three-teams-after")
+    return s.press("triangle").press("triangle").press("triangle").press("triangle")
+CASES["teams3-main"]=uneven_case(main_again,result=2,end=r"frame=\d+ page=4 state=0,0,1,3,0",after="last",
+    setups=[(3,22200,1,1000,0),(2,0,1,1000,0),(3,22200,1,1000,0)])
+CASES["teams3-main"]["states"]+=[(90,0),(4,1),(4,TEAMS_PAGE),(4,2),(4,3),(4,2),(4,TEAMS_PAGE),(4,2),(4,3),(4,2),(4,TEAMS_PAGE),(4,1),(4,0)]
+
+def teams_back(bt4):
+    s=Script().press("select").press("cross")              # Modded Modes > Team Battle: the teams page
+    s.shot("teams-page").press("triangle")                 # Triangle: Modded Modes
+    s.press("cross").press("down",30,times=4).wait(30).shot("teams-page-back-row").press("cross")   # its Back row
+    s.press("cross").press("down",30).wait(30).shot("teams-page-3").press("cross")                  # 3 Teams: Players
+    s.shot("players").press("triangle")                    # Players' Triangle: the teams page again
+    s.press("down",30,times=2).wait(30).press("cross")     # 4 Teams: Players
+    s.press("down",30,times=5).wait(30).press("cross")     # Players' Back row: the teams page
+    s.press("down",30,times=3).wait(30).press("cross")     # 5 Teams: Players
+    s.press("cross",90).shot("setup-5-teams")              # One Player: TEAM SETUP with five columns
+    squad_edit(s,"up right right",-1)                      # team 3: one fighter
+    s.press("start",150).shot("selector")                  # the character select
+    s.press("triangle",150).shot("setup-after-selector")   # back out: TEAM SETUP as it was left
+    return s.press("triangle").press("triangle").press("triangle").press("triangle").shot("main-menu")
+CASES["teams-back"]={"build":teams_back,"end":r"frame=\d+ page=4 state=0,0,1,3,0","after":"last",
+    "states":[(4,1),(4,TEAMS_PAGE),(4,1),(4,TEAMS_PAGE),(4,1),(4,TEAMS_PAGE),(4,2),(4,TEAMS_PAGE),(4,2),(4,TEAMS_PAGE),
+              (4,2),(4,3),(40,0),(4,3),(4,2),(4,TEAMS_PAGE),(4,1),(4,0)],
+    "setups":[(5,22222,1,1000,0),(5,22122,1,1000,0)],"env":{"BT3_UNCAPPED":"1"}}
+
+def teams_end(bt4):
+    s=squad_setup(3,1).press("start",150)
+    s.press("cross",60,times=4 if bt4 else 3)              # the player's fighter: one of the two the row needs
+    s.press("left",60,times=2).shot("end-under-cursor")   # over the slot just filled to End
+    s.press("cross",90).shot("end-refused")               # refused: the row is still open
+    return s.press("right",60)                            # (the cursor goes on to the first slot)
+# state=<row>,<6: the row's slots>,<5: End, then 0: the first slot>: the row never ended (no row 1 line at all)
+CASES["teams-end"]={"build":teams_end,"end":r"frame=\d+ page=40 state=0,6,0,","after":"last",
+    "states":[(4,TEAMS_PAGE),(4,2),(4,3),(40,0)],"env":{"BT3_UNCAPPED":"1"},"never":r"page=40 state=1,",
+    "seen":r"page=40 state=0,6,5,"}
+
+def teams_refuse(bt4):
+    s=squad_setup(5,2)                                     # 2-2-2-2-2, P1 on team 1, P2 on team 2
+    s.press("up",30).press("cross",30).press("right",30).wait(30).shot("ten-fighters")   # an eleventh fighter: refused
+    s.press("triangle",30)                                 # (cancel)
+    s.press("down",30).press("right",30).press("cross",30).press("left",30).press("cross",30)   # P2 joins P1 on team 1
+    s.wait(30).shot("two-players-one-team")
+    s.press("up",30).press("up",30).press("cross",30).press("left",30).wait(30).shot("needs-fighters")   # one fighter for two players: refused
+    s.press("triangle",30)
+    return s.press("triangle").press("triangle").press("triangle").press("triangle")
+CASES["teams-refuse"]={"build":teams_refuse,"end":r"frame=\d+ page=4 state=0,0,1,3,0","after":"last",
+    "states":[(4,TEAMS_PAGE),(4,2),(4,3),(4,2),(4,TEAMS_PAGE),(4,1),(4,0)],"env":{"BT3_UNCAPPED":"1"},
+    # (notice, team) of the hint row: ten at most on team 1's card; team 1 needs a fighter for each of its two players
+    "notices":[(1,1),(3,1)],"plan":(5,22222),"seats":(0,0)}
+
+def teams_full(bt4):
+    s=squad_setup(3,3)                                     # P1, P2, P3 on teams 1, 2, 3
+    squad_edit(s,"up",-1)                                  # every team down to one fighter
+    squad_edit(s,"right",-1)
+    squad_edit(s,"right",-1)
+    s.press("down",30).press("cross",30).press("right",30).wait(30).shot("no-team-left")   # P3: nowhere to go
+    s.press("triangle",30)
+    return s.press("triangle").press("triangle").press("triangle").press("triangle")
+CASES["teams-full"]={"build":teams_full,"end":r"frame=\d+ page=4 state=0,0,1,3,0","after":"last",
+    "states":[(4,TEAMS_PAGE),(4,2),(4,3),(4,2),(4,TEAMS_PAGE),(4,1),(4,0)],"env":{"BT3_UNCAPPED":"1"},
+    "notices":[(2,1)],"plan":(3,11100),"seats":(0,1,2)}
+
+
+def run(case, exe, renderer, data=None, lang="en", shots=False):
     spec = dict(CASES[case])
     if renderer=='none':
         raise ValueError('Scripted menu input requires --renderer gpu.')
     marker=Path(data)/'native-disc.json' if data else None
-    if marker and marker.exists() and json.loads(marker.read_text()).get('game')=='bt4':
-        sizes=spec.get('roster',(2,2))
-        spec['pad']=adapt_bt4_roster(spec['pad'],sizes,case=='duplicates',spec.get('cpu',False),spec.get('cpu_steps',0))
-    output = ROOT / "port/build/tag-menu-tests" / ((Path(data).name+"-" if data else "")+case)
+    bt4=bool(marker and marker.exists() and json.loads(marker.read_text()).get('game')=='bt4')
+    pads,pictures={},{}
+    if "build" in spec:
+        script=spec["build"](bt4)
+        pads=script.env();spec["pad"]=pads.pop("BT3_PAD");pictures=script.shots
+        if spec["after"]=="last": spec["after"]=int(spec["pad"].split(",")[-1].split(":")[0])
+    else:
+        if bt4:
+            sizes=spec.get('roster',(2,2))
+            spec['pad']=adapt_bt4_roster(spec['pad'],sizes,case=='duplicates',spec.get('cpu',False),spec.get('cpu_steps',0))
+        spec['pad']=team_route(spec['pad'])
+    output = ROOT / "port/build/tag-menu-tests" / ((Path(data).name+"-" if data else "")+case+("" if lang=="en" else "-"+lang))
     output.mkdir(parents=True, exist_ok=True)
     settings = output / "settings.txt"
     # These cases exercise menu routing with scripted logical pads. Physical
@@ -239,11 +496,17 @@ def run(case, exe, renderer, data=None):
     settings.write_text("tag_revive_seconds=3\ntag_controller_check=0\n"+spec.get("settings",""), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
     env.update(BT3_GS=renderer, BT3_TAG_TEAM="1", BT3_TAG_MENU_TEST="main",
-               BT3_MENU_LANG="en", BT3_UPDATE_CHECK="0", BT3_TAG_TRACE="1",
+               BT3_MENU_LANG=lang, BT3_UPDATE_CHECK="0", BT3_TAG_TRACE="1",
                BT3_LOAD_TRACE="1", BT3_SAVES=str(output / "saves"),
                BT3_SETTINGS=str(settings), BT3_MENU_ITEM4="0", BT3_PAD=spec["pad"],
                BT3_PACED="1", SDL_AUDIO_DRIVER="dummy")
+    env.update(pads)
     env.update(spec.get("env", {}))
+    for old in output.glob("*.ppm"): old.unlink()
+    if shots and pictures:
+        # <frame>.ppm in the case's folder; pictures.json says what each one shows
+        env["BT3_UI_SHOTS"]=",".join(map(str,sorted(pictures)))+":"+str(output)+os.sep
+        (output/"pictures.json").write_text(json.dumps({str(f):pictures[f] for f in sorted(pictures)},indent=1)+"\n")
     if data: env['BT3_DATA']=str(Path(data).resolve())
     if data: env.pop('BT3_PACED',None)
     if env.get("BT3_UNCAPPED") == "1":env.pop("BT3_PACED",None)
@@ -251,7 +514,7 @@ def run(case, exe, renderer, data=None):
     path = output / "runtime.log"
     with path.open("w", encoding="utf-8") as log:
         p = subprocess.Popen([str(exe)], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
-        deadline = time.monotonic() + 120
+        deadline = time.monotonic() + spec.get("timeout",120)
         try:
             while time.monotonic() < deadline:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -272,6 +535,26 @@ def run(case, exe, renderer, data=None):
     for expected in spec["states"]:
         assert expected in remaining, f"Missing ordered transition {expected}: {path}"
     assert "page=80" not in text, "Standalone setup page was entered"
+    assert "bt3: sound: dummy" in text, "The sound device is not the silent one"
+    if "squad" in spec: check_squad(spec,text)
+    assert "never" not in spec or not re.search(spec["never"],text), "Seen: "+spec.get("never","")
+    assert "seen" not in spec or re.search(spec["seen"],text), "Not seen: "+spec.get("seen","")
+    if "setups" in spec:
+        # the draft TEAM SETUP opened with, every time: teams, fighters per team, players, their teams, mode
+        opened=[tuple(map(int,m.split(","))) for m in re.findall(r"page=43 state=([\d,]+)",text)]
+        assert opened==spec["setups"],opened
+    if "notices" in spec:
+        # refusals on TEAM SETUP in order, (notice, team) of the hint row while a card is edited; what is left
+        said=[(int(n),int(t)) for n,t in re.findall(r"page=4 state=3,\d+,1,([1-9]),(\d)",text)]
+        assert said==spec["notices"],said
+        plans=[tuple(map(int,m.split(","))) for m in re.findall(r"page=44 state=([\d,]+)",text)]
+        assert plans[-1][:2]==spec["plan"],plans
+        seats=[tuple(map(int,m.split(","))) for m in re.findall(r"page=45 state=([\d,]+)",text)]
+        assert (seats[-1][:len(spec["seats"])] if seats else tuple(range(len(spec["seats"]))))==spec["seats"],seats
+    if spec.get("result")==1:
+        # back in the character select the rows are the ones that were played
+        again=[tuple(map(int,m.split(","))) for m in re.findall(r"page=48 state=([\d,]+)",text)]
+        assert again[-1][:2]==(len(spec["rows"][0]),len(spec["rows"][1])),again
     if "assignments" in spec:
         actual=[tuple(map(int,m.split(","))) for m in re.findall(r"page=45 state=([\d,]+)",text)]
         assert actual==spec["assignments"],actual
@@ -336,10 +619,12 @@ def main():
     parser.add_argument("--renderer", choices=("none", "gpu"), default="gpu")
     parser.add_argument("--case", choices=tuple(CASES), action="append")
     parser.add_argument("--data", type=Path)
+    parser.add_argument("--lang", default="en", help="BT3_MENU_LANG of the run (en, es)")
+    parser.add_argument("--shots", action="store_true", help="Take the pictures a case names (BT3_UI_SHOTS), into its folder")
     args = parser.parse_args()
     results = []
     for case in args.case or CASES:
-        result = run(case, (ROOT / args.exe).resolve(), args.renderer,args.data)
+        result = run(case, (ROOT / args.exe).resolve(), args.renderer,args.data,args.lang,args.shots)
         results.append(result)
         print(json.dumps(result), flush=True)
     (ROOT / "port/build/tag-menu-tests/results.json").write_text(json.dumps(results, indent=2) + "\n")

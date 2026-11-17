@@ -66,7 +66,10 @@ void TagRevive_CatchFallen(s32 actor) {
 
 s32 TagRevive_Progress(s32 i) { return progress[i]; }
 s32 TagRevive_Helper(s32 i) { return helper[i]; }
-s32 TagRevive_Enabled(void) { return !TagLobby_Practice() && Port_TagOption(TAG_OPT_REVIVE) && TagSession_Mode()!=TAG_MODE_FREE_FOR_ALL; }
+s32 TagRevive_Enabled(void) {
+    return !TagLobby_Practice() && Port_TagOption(TAG_OPT_REVIVE) && TagSession_Mode()!=TAG_MODE_FREE_FOR_ALL &&
+        TagTeam_Feature(TAG_FEATURE_REVIVE);
+}
 s32 TagRevive_Duration(void) { return duration; }
 s32 TagRevive_Cost(void) { return cost; }
 f32 TagRevive_Radius(void) { return radius; }

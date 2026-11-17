@@ -19,11 +19,15 @@ extern s32 gDmaVif1Started;
 
 #ifdef PORT
 static void Dma_CheckRoom(s32 bytes) {
-    extern void Port_TagTeamFatal(const char *);
+    extern void Port_TagCapacityFatal(const char *, s32, s32, s32);
+    extern void Port_TagMark(s32, s32, s32);
+    extern s32 Port_TagOverrunTest(s32);
     if (bytes < 0 || (u32)gDmaCur < gDmaBuf[gDmaBufIdx] ||
         (u32)gDmaCur > gDmaBufEnd[gDmaBufIdx] ||
-        (u32)bytes > gDmaBufEnd[gDmaBufIdx] - (u32)gDmaCur)
-        Port_TagTeamFatal("native display list exceeded its reserved space");
+        (u32)bytes > gDmaBufEnd[gDmaBufIdx] - (u32)gDmaCur || Port_TagOverrunTest(1))
+        Port_TagCapacityFatal("native display list exceeded its reserved space", bytes,
+                              (s32)((u32)gDmaCur - gDmaBuf[gDmaBufIdx]), gDmaBufSize);
+    Port_TagMark(0, (s32)((u32)gDmaCur - gDmaBuf[gDmaBufIdx]) + bytes, gDmaBufSize);
 }
 #else
 #define Dma_CheckRoom(bytes) ((void)0)

@@ -362,9 +362,14 @@ void *File_Request(s32 id, void *buf) {
 
     req = (FileReq *)List_PopFront(&queue->free);
 #ifdef PORT
-    if (req == NULL) {
-        extern void Port_TagTeamFatal(const char *);
-        Port_TagTeamFatal("file request queue exhausted");
+    {
+        extern void Port_TagCapacityFatal(const char *, s32, s32, s32);
+        extern void Port_TagMark(s32, s32, s32);
+        extern s32 Port_TagOverrunTest(s32);
+        s32 used = FILE_REQ_MAX - List_GetCount(&queue->free); /* with this request, when there was room */
+        if (req == NULL || Port_TagOverrunTest(3))
+            Port_TagCapacityFatal("file request queue exhausted", 1, req == NULL ? used : used - 1, FILE_REQ_MAX);
+        Port_TagMark(3, used, FILE_REQ_MAX);
     }
 #endif
     req->flags = flags;

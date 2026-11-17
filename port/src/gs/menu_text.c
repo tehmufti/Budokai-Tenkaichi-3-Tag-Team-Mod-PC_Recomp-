@@ -1084,6 +1084,7 @@ static void *item_thread(void *arg) {
                 snprintf(labels[TAG_LABEL_PRESETS+n++],96,"%s",gauntlets[i].name);
             for(i=0;i<5;i++)snprintf(labels[TAG_LABEL_TOURS+i],96,"%s",bt4&&i==4?"Tournament of Power":tours[i]);
             snprintf(labels[TAG_LABEL_PREV],96,"Previous page");snprintf(labels[TAG_LABEL_NEXT],96,"Next page");
+            for(i=0;i<4;i++)snprintf(labels[TAG_LABEL_TEAMS+i],96,"%d Teams",i+2);
         }
         { extern const char *Port_TagText(const char *); for(i=0;i<TAG_LABEL_COUNT;i++)names[i]=Port_TagText(names[i]); }
         MenuLabels_MainTexts(data?data:"gamedata",names,TAG_LABEL_COUNT,sTagPic);

@@ -1086,6 +1086,29 @@ static void vk_frame_end(void) {
                     file++;
                 }
             }
+            {   /* BT3_UI_SHOTS=<frame>,<frame>,...:<prefix>: several pictures of one run, <prefix><frame>.ppm each */
+                static int shots[64], shotCount = -1, shotNext;
+                static const char *prefix;
+                static char name[1200];
+                if (shotCount < 0) {
+                    const char *list = getenv("BT3_UI_SHOTS");
+                    shotCount = 0;
+                    if (list != NULL && (prefix = strchr(list, ':')) != NULL) {
+                        prefix++;
+                        while (shotCount < 64 && *list >= '0' && *list <= '9') {
+                            shots[shotCount++] = atoi(list);
+                            while (*list >= '0' && *list <= '9') { list++; }
+                            if (*list == ',') { list++; }
+                        }
+                    }
+                }
+                if (frame == 0 && shotNext < shotCount && gGsFrame >= (unsigned)shots[shotNext]) {
+                    snprintf(name, sizeof(name), "%s%d.ppm", prefix, shots[shotNext++]);
+                    file = name;
+                    frame = 1;
+                    byTime = 0;
+                }
+            }
             if (frame > 0 && (byTime ? SDL_GetTicks() : gGsFrame) >= (unsigned)frame) {
                 SDL_GPUTextureCreateInfo ci;
                 SDL_GPUTransferBufferCreateInfo ti;

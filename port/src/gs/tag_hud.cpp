@@ -43,9 +43,10 @@ extern "C" int Port_TagOnlinePreview(unsigned address) {
     return 1;
 }
 static SDL_SpinLock artLock;
-static unsigned char artPixels[6][256*64*4];
+// Art 0..5 are the six colourings of the disc's meter sheet; art 6 is its shading alone, for a tint.
+static unsigned char artPixels[7][256*64*4];
 static bool artPending;
-static SDL_GPUTexture *artTextures[6];
+static SDL_GPUTexture *artTextures[7];
 extern SDL_GPUTexture *Ui_Texture(uint8_t *,uint32_t,uint32_t);
 extern void Ui_TextureFree(SDL_GPUTexture *);
 /* Copy the player's resident HUD atlas once at battle load. No renderer ever
@@ -73,12 +74,24 @@ extern "C" void Port_TagHudArt(unsigned address) {
             memcpy(out,pal+index*4,4);out[3]=std::min(255,int(out[3])*2);
         }
     }
+    {   // The blue fill's light and shade as greys, its brightest point white: any team colour can tint it.
+        int top=1;
+        for(int y=0;y<12;y++) for(int x=66;x<156;x++) {
+            const auto *p=artPixels[5]+4*(y*256+x);
+            top=std::max(top,std::max(int(p[0]),std::max(int(p[1]),int(p[2]))));
+        }
+        for(int i=0;i<256*64;i++) {
+            const auto *p=artPixels[5]+4*i;auto *out=artPixels[6]+4*i;
+            int v=std::min(255,std::max(int(p[0]),std::max(int(p[1]),int(p[2])))*255/top);
+            out[0]=out[1]=out[2]=(unsigned char)v;out[3]=p[3];
+        }
+    }
     artPending=true;SDL_UnlockSpinlock(&artLock);
 }
 static void load_art() {
     SDL_LockSpinlock(&artLock);
     if(artPending) {
-        for(int k=0;k<6;k++) {
+        for(int k=0;k<7;k++) {
             auto *p=(uint8_t *)malloc(sizeof(artPixels[k]));
             if(!p)continue;
             memcpy(p,artPixels[k],sizeof(artPixels[k]));
@@ -217,7 +230,17 @@ extern "C" void Port_TagOptionFormat(int id,int v,unsigned output,int size) {
     snprintf(p,size,"%s",Port_TagText(label));
 }
 extern "C" void Port_TagOptionValue(int id,unsigned output,int size) { Port_TagOptionFormat(id,Port_TagOption(id),output,size); }
-static ImU32 team(int t) {return t?IM_COL32(255,115,95,255):IM_COL32(75,195,255,255);}
+// Two teams are blue and red. Three to five teams have a colour each: blue, red, green, gold, violet.
+static int hudTeams=2;
+static ImU32 team(int t) {
+    static const ImU32 squad[5]={IM_COL32(75,195,255,255),IM_COL32(255,115,95,255),IM_COL32(88,224,120,255),
+                                 IM_COL32(255,208,64,255),IM_COL32(192,128,255,255)};
+    if(hudTeams>=3) return squad[t>=0&&t<5?t:0];
+    return t?IM_COL32(255,115,95,255):IM_COL32(75,195,255,255);
+}
+// The fill of a team's health meter: with two teams the disc's own blue or red (chosen from the colour, as
+// always); with three or more the tinted art, or green and violet would share the red team's fill.
+static int team_art() { return hudTeams>=3?6:-1; }
 static float clamp(float v){return std::clamp(v,0.0f,1.0f);}
 static void text(ImDrawList *d,float x,float y,float size,ImU32 color,const char *s,float width=10000) {
     s=Port_TagText(s);
@@ -242,7 +265,7 @@ static void bar(ImDrawList *d,float x,float y,float w,float h,float fill,ImU32 c
             image(0,x,y,w,h,66,0,156,12,IM_COL32_WHITE);
             if(palette<0)palette=((color>>16)&255)>190&&(color&255)<128?5:
                 (color&255)>190&&((color>>8)&255)>190?4:3;
-            if(fill>0)image(palette,x,y,w*clamp(fill),h,66,0,66+90*clamp(fill),12,IM_COL32_WHITE);
+            if(fill>0)image(palette,x,y,w*clamp(fill),h,66,0,66+90*clamp(fill),12,palette==6?color:IM_COL32_WHITE);
         } else {
             // Matching slanted silhouette before the first battle loads its art.
             d->AddQuadFilled(ImVec2(x+shear-2,y-2),ImVec2(x+w+shear+2,y-2),ImVec2(x+w+2,y+h+2),ImVec2(x-2,y+h+2),IM_COL32(5,8,12,240));
@@ -401,10 +424,30 @@ void TagHud_Draw() {
     }
     TagHudState s;
     SDL_LockSpinlock(&lock); s=latest; SDL_UnlockSpinlock(&lock);
+    hudTeams=s.active?s.teamCount:2;
     if(!s.active||gUiPresentW<=0||gUiPresentH<=0) return;
     ImDrawList *d=ImGui::GetBackgroundDrawList();
     float sx=gUiPresentW/512.0f, sy=gUiPresentH/448.0f;
     auto point=[&](float x,float y){return ImVec2(std::round(gUiPresentX+x*sx),std::round(gUiPresentY+y*sy));};
+    if(s.teamCount>=3 && s.winnerTeam>=0 && s.winnerTeam<5) {
+        // The native result knows two sides. Name the winning team once, over the whole window, in its colour:
+        // on a dark plate and outlined all round, because it stands on sky, clouds or grass.
+        static const float around[8][2]={{-1,0},{1,0},{0,-1},{0,1},{-.7f,-.7f},{.7f,-.7f},{-.7f,.7f},{.7f,.7f}};
+        char banner[64];
+        snprintf(banner,sizeof(banner),Port_TagText("TEAM %d WINS"),s.winnerTeam+1);
+        ImFont *font=ImGui::GetFont();
+        ImU32 color=team(s.winnerTeam);
+        float size=40*std::min(sx,sy),room=gUiPresentW*0.8f;
+        float width=font->CalcTextSizeA(size,10000,0,banner).x;
+        if(width>room){size*=room/width;width=room;}
+        float x=std::round(gUiPresentX+(gUiPresentW-width)*0.5f),y=std::round(gUiPresentY+gUiPresentH*0.16f);
+        float edge=std::max(2.0f,size*0.055f),side=size*0.55f;
+        d->AddRectFilled(ImVec2(x-side,y-size*0.06f),ImVec2(x+width+side,y+size*1.2f),IM_COL32(6,10,20,170),size*0.22f);
+        d->AddRectFilled(ImVec2(x-side*0.5f,y+size*1.08f),ImVec2(x+width+side*0.5f,y+size*1.13f),color,size*0.025f);
+        for(int k=0;k<8;k++) d->AddText(font,size,ImVec2(x+around[k][0]*edge,y+around[k][1]*edge),IM_COL32(0,0,0,255),banner);
+        d->AddText(font,size,ImVec2(x,y),color,banner);
+        d->AddText(font,size,ImVec2(x+std::max(1.0f,size*0.025f),y),color,banner);
+    }
     if(!s.shown || s.paused || Port_TagOption(TAG_OPT_HIDE_ALL_HUD)) return;
     const bool onlineObserver=TagNet_Active() && TagNet_Observer();
     int views=s.shared?1:s.views;
@@ -441,7 +484,7 @@ void TagHud_Draw() {
                 text(d,statusX,allyRow,8*sc,team(a.team),label,statusWidth); allyRow+=18*sc;
             }
             bar(d,statusX,allyRow,std::min(80*sc,statusWidth-3*sc),3*sc,
-                ally.hpMax>0?(float)ally.hp/ally.hpMax:0,team(a.team)); allyRow+=8*sc;
+                ally.hpMax>0?(float)ally.hp/ally.hpMax:0,team(a.team),team_art()); allyRow+=8*sc;
         }
         if(columns) statusX+=statusWidth+margin;
         else if(!allies) row+=20*sc;
@@ -504,7 +547,7 @@ void TagHud_Draw() {
                 ImVec2 p=point(head.x,head.y);
                 float hs=sc*head.scale;
                 if(Port_TagOption(other.team==a.team?TAG_OPT_ALLY_OVERHEAD:TAG_OPT_ENEMY_OVERHEAD))
-                    bar(d,p.x-20*hs,p.y,40*hs,3*hs,other.hpMax>0?(float)other.hp/other.hpMax:0,team(other.team));
+                    bar(d,p.x-20*hs,p.y,40*hs,3*hs,other.hpMax>0?(float)other.hp/other.hpMax:0,team(other.team),team_art());
             }
         }
 

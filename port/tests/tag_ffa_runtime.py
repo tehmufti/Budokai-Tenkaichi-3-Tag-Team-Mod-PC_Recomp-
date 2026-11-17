@@ -32,7 +32,11 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--case",choices=("effects","combat","blind"),default="effects")
     p.add_argument("--renderer",choices=("none","gpu"),default="none")
+    p.add_argument("--exe",default="port/build/bt3.exe" if os.name=="nt" else "port/build/bt3_64")
+    p.add_argument("--data",help="Game data folder (BT3_DATA); default: gamedata in the tree")
     args=p.parse_args()
+    exe=Path(args.exe)
+    if not exe.is_absolute():exe=ROOT/exe
     out=ROOT/"port/build/tag-ffa-tests"/args.case
     out.mkdir(parents=True,exist_ok=True)
     settings=out/"settings.txt"
@@ -42,6 +46,7 @@ def main():
                BT3_TAG_ROSTER="5,5",BT3_TAG_TEST_SPAWN="1",BT3_TEST_STAGE="2",
                BT3_SETTINGS=str(settings),BT3_SAVES=str(out/"saves"),
                BT3_UPDATE_CHECK="0",BT3_TAG_TRACE="1",SDL_AUDIO_DRIVER="dummy")
+    if args.data:env["BT3_DATA"]=str(Path(args.data).resolve())
     if args.case=="effects":
         env["BT3_TAG_TEST_STAGE"]="4"
     if args.case=="blind":
@@ -51,7 +56,7 @@ def main():
                    BT3_WINDOW="960x720",BT3_UI_SHOT=f"700:{(out/'frame.ppm').as_posix()}")
     log=out/"runtime.log"
     with log.open("w") as f:
-        r=subprocess.run([str(ROOT/"port/build/bt3.exe")],cwd=ROOT,env=env,
+        r=subprocess.run([str(exe)],cwd=ROOT,env=env,
                          stdout=f,stderr=subprocess.STDOUT,timeout=180)
     text=log.read_text(errors="replace")
     expected="bt3: battle finished" if args.case=="combat" else "PASS check=99"

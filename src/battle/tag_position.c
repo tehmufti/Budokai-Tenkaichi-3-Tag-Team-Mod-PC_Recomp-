@@ -71,6 +71,42 @@ static s32 safe(s32 actor,Vec4 *p,s32 clamp) {
 s32 TagPosition_SafeSpot(s32 actor,Vec4 *pos) {
     return safe(actor,pos,0);
 }
+/* Three or more teams: one base per team on a circle around the midpoint of
+   the stage's two authored starts. Team 0 keeps the direction of start 0 and
+   the others follow at equal angles (two teams would stand where the stage
+   puts them). The circle is wide enough for the teams' rings of places to
+   stay apart (gap is one place) and is kept inside the arena, the
+   tournament ring on its stages. Only x and z of the base are written;
+   the teams face the centre. */
+void TagPosition_SquadBase(Vec4 *start0,Vec4 *start1,s32 team,s32 teams,f32 gap,Vec4 *base,Vec4 *centre) {
+    extern f32 sinf(f32),cosf(f32);
+    extern s32 BtlChar_IsStage4Or27(void);
+    /* (signed conversions: see tag_spawn.c) */
+    volatile s32 signedTeam=team,signedTeams=teams;
+    f32 index=signedTeam,total=signedTeams;
+    f32 limit=BtlStage_GetInnerRadius();
+    f32 cx=(start0->x+start1->x)*.5f,cz=(start0->z+start1->z)*.5f;
+    f32 dx=start0->x-cx,dz=start0->z-cz,r=sqrtf(dx*dx+dz*dz);
+    f32 room,wanted,far,angle,c,s;
+    if(BtlChar_IsStage4Or27() && limit>185)limit=185;
+    room=limit-gap*1.5f;
+    if(room<gap)room=gap;
+    if(r<1.0f){dx=1.0f;dz=0.0f;r=1.0f;}
+    dx/=r;dz/=r;
+    wanted=gap*1.25f/sinf(3.14159265f/total);
+    if(r<wanted)r=wanted;
+    if(r>room)r=room;
+    far=sqrtf(cx*cx+cz*cz);
+    if(far+r>room && far>.001f) {
+        f32 keep=(room-r)/far;
+        cx*=keep;cz*=keep;
+    }
+    angle=6.2831853f*index/total;
+    c=cosf(angle);s=sinf(angle);
+    base->x=cx+(dx*c-dz*s)*r;
+    base->z=cz+(dx*s+dz*c)*r;
+    centre->x=cx;centre->y=start0->y;centre->z=cz;centre->w=1.0f;
+}
 static s32 owner(s32 actor) {
     BtlCollThrow *a=&((BtlCollChr *)BtlChar_Get(actor))->thr,*b;
     s32 at=a->atkSide,de=a->defSide;

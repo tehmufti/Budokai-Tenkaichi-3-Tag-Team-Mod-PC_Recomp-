@@ -53,12 +53,12 @@ void TagStage_TestTick(s32 tick) {
         TagBlind_RenderTest(tick);return;
     }
     if(tick==1) cameraPhase=0;
-    if(Port_TagSpawnTest() && tick==1) {
+    if(Port_TagSpawnTest() && tick==1 && TagTeam_TeamCount()<3) {
         extern s32 TagRevive_Enabled(void),TagRevive_Nearby(s32);
         Port_TagTestCheck(!TagRevive_Enabled() && TagRevive_Nearby(0)==-1,697);
     }
     if(Port_TagSpawnTest() && (tick==1||tick==40)) {
-        s32 a,b;
+        s32 a,b,squads=TagTeam_TeamCount()>=3;
         Vec4 spawns[10],rot;
         f32 extent=BtlStage_GetInnerRadius(),minX=extent,maxX=-extent,minZ=extent,maxZ=-extent;
         extern f32 BtlCharApi_GetRadius(s32);
@@ -66,8 +66,10 @@ void TagStage_TestTick(s32 tick) {
         if(BtlChar_IsStage4Or27() && extent>185)extent=185;
         for(a=0;a<TagTeam_Count();a++) {
             Vec4 actual=((BtlMovePose *)&BtlChar_Get(a)->pose)->pos;
-            Port_TagTestCheck(TagPosition_FreeForAllStart(a,&spawns[a],&rot),690);
-            if(Battle_GetStage()==2) {
+            /* Three or more teams start at their team's base (stg_a_b.c). */
+            if(squads) BtlStage_GetStartPlace(a,&spawns[a],&rot,0);
+            else Port_TagTestCheck(TagPosition_FreeForAllStart(a,&spawns[a],&rot),690);
+            if(Battle_GetStage()==2 && !squads) {
                 extern f32 TagSpawn_Clearance(s32,Vec4);
                 Port_TagTestCheck(TagSpawn_Clearance(a,spawns[a])>=.64f,698);
             }
@@ -123,7 +125,39 @@ void TagStage_TestTick(s32 tick) {
         }
         /* The playable islands need not fill the cylinder equally in X/Z.
            Require wide distribution, not a square-shaped terrain footprint. */
-        {
+        if(squads) {
+            f32 midX[5]={0,0,0,0,0},midZ[5]={0,0,0,0,0};
+            s32 n[5]={0,0,0,0,0},t;
+            for(a=0;a<TagTeam_Count();a++) {
+                t=TagTeam_Team(a);
+                Port_TagTestCheck((u32)t<(u32)TagTeam_TeamCount(),709);
+                midX[t]+=spawns[a].x;midZ[t]+=spawns[a].z;n[t]++;
+            }
+            for(t=0;t<5;t++) if(n[t]) {
+                volatile s32 signedCount=n[t];
+                f32 members=signedCount;
+                midX[t]/=members;midZ[t]/=members;
+            }
+            for(a=0;a<TagTeam_Count();a++) {
+                f32 mate=1.0e30f,foe=1.0e30f,own,x,z;
+                s32 team=TagTeam_Team(a);
+                for(b=0;b<TagTeam_Count();b++) if(b!=a) {
+                    x=spawns[a].x-spawns[b].x;z=spawns[a].z-spawns[b].z;
+                    if(TagTeam_Team(b)==team) {if(x*x+z*z<mate)mate=x*x+z*z;}
+                    else if(x*x+z*z<foe)foe=x*x+z*z;
+                }
+                /* Teammates together: the nearest fighter is one's own. */
+                if(n[team]>1) Port_TagTestCheck(mate<foe,710);
+                /* Teams apart: nobody stands nearer to another team's middle. */
+                x=spawns[a].x-midX[team];z=spawns[a].z-midZ[team];own=x*x+z*z;
+                for(t=0;t<5;t++) if(t!=team && n[t]) {
+                    x=spawns[a].x-midX[t];z=spawns[a].z-midZ[t];
+                    Port_TagTestCheck(own<x*x+z*z,711);
+                }
+                /* Inside the arena (the ring on tournament stages). */
+                Port_TagTestCheck(spawns[a].x*spawns[a].x+spawns[a].z*spawns[a].z<=extent*extent,712);
+            }
+        } else {
             f32 wide,narrow;
             scatter_extent(extent,&wide,&narrow);
             Port_TagTestCheck((maxX-minX>wide*.5f || maxZ-minZ>wide*.5f) &&

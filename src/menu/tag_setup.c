@@ -17,7 +17,36 @@ static s32 controls_card(void) {return TagSession_Players()+(gauntlet()?3:2);}
 static f32 rules_y(void) {return gauntlet()?270:275;}
 static f32 controls_y(void) {return gauntlet()?330:310;}
 static f32 buttons_y(void) {return gauntlet()?360:342;}
-void TagSetup_Reset(void) { Port_TagControllersCancel(); focus=!TagSession_Players()&&tournament()?1:0; checkedThisSetup=0; editing=0; }
+/* Team Battle with three to five teams: one column per team across the same
+   panel, a fighters card on top (the card ids after the two buttons) and the
+   team's players under it. With two teams none of this runs. */
+enum { NOTICE_NONE, NOTICE_TEN, NOTICE_FULL, NOTICE_SEATS };
+static s32 notice,noticeTeam;
+static s32 squads(void) {return TagSession_Teams()>=3;}
+static s32 size_card(s32 team) {return controls_card()+3+team;}
+static s32 size_team(s32 id) {return squads() && id>=size_card(0) && id<size_card(TagSession_Teams())?id-size_card(0):-1;}
+static s32 card_count(void) {return controls_card()+3+(squads()?TagSession_Teams():0);}
+static f32 column_w(void) {static const f32 w[]={146,108,85};return w[TagSession_Teams()-3];}
+static f32 column_x(s32 team) {return 30+team*(452-column_w())/(TagSession_Teams()-1);}
+/* The team colours of the match (port/src/gs/tag_hud.cpp): blue, red, green,
+   gold, violet. light 0 is the colour itself; towards 1 it goes white,
+   towards -1 black. */
+u32 TagSetup_TeamColor(s32 team,f32 light,s32 alpha) {
+    static const u8 rgb[5][3]={{75,195,255},{255,115,95},{88,224,120},{255,208,64},{192,128,255}};
+    const u8 *c=rgb[(u32)team<5?team:0];
+    s32 k,v[3];
+    for(k=0;k<3;k++) v[k]=(s32)(light<0?c[k]*(1+light):c[k]+(255-c[k])*light);
+    return Ps_Rgba(v[0],v[1],v[2],alpha);
+}
+/* Menu tests: the draft the page opens with (teams, fighters per team, the players' teams, 1..5). */
+static void setup_trace(void) {
+    extern void Port_TagMenuTrace(s32,s32,s32,s32,s32,s32);
+    s32 t,p,sizes=0,seats=0;
+    for(t=0;t<5;t++) sizes=sizes*10+(squads()?TagSession_TeamSize(t):0);
+    for(p=0;p<4;p++) seats=seats*10+(p<TagSession_Players()?TagSession_PlayerTeam(p)+1:0);
+    Port_TagMenuTrace(43,TagSession_Teams(),sizes,TagSession_Players(),seats,TagSession_DraftMode());
+}
+void TagSetup_Reset(void) { Port_TagControllersCancel(); focus=!TagSession_Players()&&tournament()?1:0; checkedThisSetup=0; editing=0; notice=0; setup_trace(); }
 static s32 visible(s32 id) {
     s32 players=TagSession_Players();
     if(id==players)return !tournament();
@@ -30,8 +59,10 @@ static void card_center(s32 id,f32 *x,f32 *y) {
         if(tournament()) {*x=256;*y=157+31*id;return;}
         team=TagSession_PlayerTeam(id);
         for(p=0;p<id;p++) if(TagSession_PlayerTeam(p)==team) n++;
+        if(squads()) {*x=column_x(team)+column_w()/2;*y=179+25*n;return;}
         *x=139+234*team; *y=157+31*n;
-    } else if(id<=players+1) {*x=256;*y=rules_y()+14;}
+    } else if(size_team(id)>=0) {*x=column_x(size_team(id))+column_w()/2;*y=154;}
+    else if(id<=players+1) {*x=256;*y=rules_y()+14;}
     else if(gauntlet() && id==players+2) {*x=256;*y=313;}
     else if(id==controls_card()) {*x=256;*y=controls_y()+13;}
     else {*x=id==controls_card()+1?318:86;*y=buttons_y()+17;}
@@ -40,7 +71,7 @@ static void navigate(u32 nav) {
     s32 i,best=focus,players=TagSession_Players();
     f32 x,y,bestScore=100000;
     card_center(focus,&x,&y);
-    for(i=0;i<controls_card()+3;i++) {
+    for(i=0;i<card_count();i++) {
         f32 nx,ny,along,across,score;
         if(i==focus || !visible(i) || (!players&&i==controls_card())) continue;
         card_center(i,&nx,&ny);
@@ -70,6 +101,50 @@ static void plate(f32 x,f32 y,f32 w,f32 h,s32 selected,s32 red) {
     }
     Ps_Quad(x+7,y,x+w,y,x,y+h,x+w-7,y+h,edge,edge,edge,edge);
     Ps_Quad(x+8,y+2,x+w-3,y+2,x+3,y+h-2,x+w-8,y+h-2,top,top,bottom,bottom);
+}
+static void team_plate(f32 x,f32 y,f32 w,f32 h,s32 selected,s32 team) {
+    u32 edge=Ps_Rgba(69,30,92,128);
+    u32 top=TagSetup_TeamColor(team,0.55f,118),bottom=TagSetup_TeamColor(team,-0.15f,118);
+    if(selected) {
+        edge=Ps_Rgba(255,214,57,128);
+        top=Ps_Rgba(255,246,176,128); bottom=Ps_Rgba(247,183,70,128);
+    }
+    Ps_Quad(x+7,y,x+w,y,x,y+h,x+w-7,y+h,edge,edge,edge,edge);
+    Ps_Quad(x+8,y+2,x+w-3,y+2,x+3,y+h-2,x+w-8,y+h-2,top,top,bottom,bottom);
+}
+/* The columns: heading in the team's colour, the fighters card, the players
+   who chose the team (25 units apart: four of them end above the rules). */
+static void draw_squads(void) {
+    s32 t,p,n,teams=TagSession_Teams(),players=TagSession_Players();
+    f32 w=column_w(),scale=teams==3?0.85f:teams==4?0.8f:0.72f;
+    char text[64];
+    Ps_Align(1);
+    for(t=0;t<teams;t++) {
+        f32 x=column_x(t),cx=x+w/2;
+        s32 card=size_card(t),size=TagSession_TeamSize(t);
+        sprintf(text,Port_TagText("TEAM %d"),t+1);
+        Ps_TextExOuter(cx,118,text,teams==3?1.05f:teams==4?0.95f:0.85f,w-6,TagSetup_TeamColor(t,0.6f,128),
+            TagSetup_TeamColor(t,0,128),Ps_Rgba(24,12,44,128),Ps_Rgba(0,0,0,128),0.8f);
+        team_plate(x,143,w,22,focus==card,t);
+        if(editing && focus==card) sprintf(text,"%s%d%s",size>1?"< ":"",size,size<5?" >":"");
+        else if(size==1) Ps_Copy(text,"1 FIGHTER",sizeof(text));
+        else sprintf(text,Port_TagText("%d FIGHTERS"),size);
+        Ps_Text(cx,144,text,scale,w-22,focus==card?1:2);
+        for(p=n=0;p<players;p++) if(TagSession_PlayerTeam(p)==t) {
+            f32 y=168+25*n++;
+            team_plate(x,y,w,22,focus==p,t);
+            sprintf(text,editing && focus==p?"< P%d >":"P%d",p+1);
+            Ps_Text(cx,y+1,text,scale,w-22,focus==p?1:2);
+        }
+        if(!n) Ps_Text(cx,169,"CPU",scale,w-16,2);
+    }
+}
+static void draw_notice(void) {
+    char text[128];
+    if(notice==NOTICE_TEN) Ps_Copy(text,"10 fighters at most: lower another team first.",sizeof(text));
+    else sprintf(text,Port_TagText(notice==NOTICE_FULL?"Team %d has no fighter left for another player.":
+        "Team %d needs a fighter for each of its players."),noticeTeam+1);
+    Ps_TextEx(256,382,text,0.65f,455,Ps_Rgba(255,236,200,128),Ps_Rgba(255,150,110,128),Ps_Rgba(80,16,8,128));
 }
 void TagSetup_Draw(void) {
     s32 p,t,n[4]={0,0,0,0},players=TagSession_Players();
@@ -109,14 +184,16 @@ void TagSetup_Draw(void) {
     Ps_Text(256,76,ffa()?"LINEUP":"TEAMS",0.7f,100,1);
     Ps_Text(329,76,">",0.7f,18,2);
     Ps_Text(400,76,"FIGHTERS",0.7f,100,2);
-    Ps_Text(256,101,"Choose your fighters on the next screen. End each team when ready.",0.65f,460,2);
-    if(tournament()) Ps_Text(256,119,"ENTER UP TO FOUR TEAMS - other entrants are CPU teams",0.75f,452,2);
+    Ps_Text(256,101,squads()?"Fighters per team: up to 10 in total. Players take the first fighters of their team.":
+        "Choose your fighters on the next screen. End each team when ready.",0.65f,460,2);
+    if(squads()) draw_squads();
+    else if(tournament()) Ps_Text(256,119,"ENTER UP TO FOUR TEAMS - other entrants are CPU teams",0.75f,452,2);
     else if(TagSession_DraftMode()==TAG_MODE_GAUNTLET) Ps_Heading(139,119,"YOUR TEAM",1.05f,195,128);
     else if(!ffa()) {
         Ps_Heading(139,119,"TEAM 1",1.05f,195,128);
         Ps_Heading(373,119,"TEAM 2",1.05f,195,128);
     } else Ps_Text(256,119,"EVERY FIGHTER FOR THEMSELVES",0.85f,440,2);
-    for(p=0;p<TagSession_Players();p++) {
+    for(p=0;!squads() && p<TagSession_Players();p++) {
         t=TagSession_PlayerTeam(p); x=tournament()?96:30+t*234; y=143+(tournament()?p:n[t])*31;n[t]++;
         plate(x,y,tournament()?320:218,28,focus==p,t);
         if(tournament())sprintf(text,Port_TagText("Player %d  -  Team %d"),p+1,t+1);else sprintf(text,Port_TagText("Player %d"),p+1);
@@ -124,7 +201,7 @@ void TagSetup_Draw(void) {
         if(focus==p && editing && !ffa()) Ps_Text(x+196,y+2,t?"<":">",0.9f,16,1);
     }
     Ps_Align(1);
-    for(t=0;t<2;t++) if(n[t]==0 && !ffa() && !tournament() && TagSession_DraftMode()!=TAG_MODE_GAUNTLET) Ps_Text(139+t*234,160,"CPU team",0.85f,205,2);
+    for(t=0;t<2;t++) if(n[t]==0 && !squads() && !ffa() && !tournament() && TagSession_DraftMode()!=TAG_MODE_GAUNTLET) Ps_Text(139+t*234,160,"CPU team",0.85f,205,2);
     if(!players) Ps_Text(256,211,"CPU ONLY - choose every fighter, then watch the battle.",0.8f,440,2);
     for(t=0;t<2;t++) {
         if(!visible(players+t))continue;
@@ -148,10 +225,33 @@ void TagSetup_Draw(void) {
     plate(154,buttons_y(),328,gauntlet()?31:35,focus==controls_card()+1,0);
     Ps_Text(86,buttons_y()+4,"Back",0.95f,100,2);
     Ps_Text(318,buttons_y()+4,"Choose Fighters",1.05f,290,focus==controls_card()+1?1:2);
-    Ps_Text(256,gauntlet()?396:382,editing?"Left / Right changes the value. Cross saves. Triangle cancels.":
+    if(notice) draw_notice();
+    else Ps_Text(256,gauntlet()?396:382,editing?"Left / Right changes the value. Cross saves. Triangle cancels.":
         "Directions move between cards. Cross selects. Start continues.",0.65f,455,2);
     Ps_Align(0); Ps_PromptsClear();
     Ps_Prompt(0,editing?"Confirm":"Select"); Ps_Prompt(7,"Continue"); Ps_Prompt(2,editing?"Cancel":"Back"); Ps_PromptsDraw(); Ps_Align(1);
+}
+/* Left / Right on a card of the columns. A player goes to the next team that
+   way which still has a fighter without a player; a fighters card changes its
+   team's size. What cannot be done gets the reject sound and a line in the
+   hint row. */
+static void squad_change(s32 direction) {
+    s32 teams=TagSession_Teams(),team=size_team(focus),k,p;
+    notice=0;
+    if(team>=0) {
+        s32 size=TagSession_TeamSize(team)+direction;
+        if(TagSession_ChangeTeamSize(team,direction)) {Snd_PlaySe(1,0);return;}
+        /* inside one to five: ten in the match, or a player would lose the fighter */
+        if(size>=1 && size<=5) {notice=direction>0?NOTICE_TEN:NOTICE_SEATS;noticeTeam=team;}
+        Snd_PlaySe(1,7);return;
+    }
+    for(k=1;k<teams;k++) {
+        s32 next=(TagSession_PlayerTeam(focus)+direction*k+teams*4)%teams,taken=0;
+        for(p=0;p<TagSession_Players();p++) if(p!=focus && TagSession_PlayerTeam(p)==next) taken++;
+        if(taken<TagSession_TeamSize(next)) {TagSession_SetPlayerTeam(focus,next);Snd_PlaySe(1,0);return;}
+    }
+    notice=NOTICE_FULL;noticeTeam=(TagSession_PlayerTeam(focus)+direction+teams)%teams;
+    Snd_PlaySe(1,7);
 }
 s32 TagSetup_Input(void) {
     extern void Port_TagMenuTrace(s32,s32,s32,s32,s32,s32);
@@ -169,23 +269,27 @@ s32 TagSetup_Input(void) {
     if(raw&PAD_LSTICK_RIGHT) nav|=PADG_RIGHT;
     if(raw&PAD_LSTICK_UP) nav|=PADG_UP;
     if(raw&PAD_LSTICK_DOWN) nav|=PADG_DOWN;
-    Port_TagMenuTrace(4,3,focus,editing,0,0);
+    Port_TagMenuTrace(4,3,focus,editing,notice,notice?noticeTeam+1:0);
     if(editing) {
         if(pressed&PADG_TRIANGLE) {
             if(focus<players) TagSession_SetPlayerTeam(focus,editOriginal);
+            else if(size_team(focus)>=0) TagSession_SetTeamSize(size_team(focus),editOriginal);
             else while(editDelta) {
                 s32 undo=editDelta>0?-1:1;
                 TagSession_ChangeRule(focus-players,undo);editDelta+=undo;
             }
-            editing=0;Snd_PlaySe(1,2);return 0;
+            editing=0;notice=0;Snd_PlaySe(1,2);return 0;
         }
         if(nav&(PADG_LEFT|PADG_RIGHT)) {
             s32 direction=(nav&PADG_RIGHT)?1:-1;
-            if(focus<players) TagSession_SetPlayerTeam(focus,tournament()?(TagSession_PlayerTeam(focus)+direction+4)%4:direction>0?1:0);
-            else {TagSession_ChangeRule(focus-players,direction);editDelta+=direction;}
-            Snd_PlaySe(1,0);
+            if(squads() && (focus<players || size_team(focus)>=0)) squad_change(direction);
+            else {
+                if(focus<players) TagSession_SetPlayerTeam(focus,tournament()?(TagSession_PlayerTeam(focus)+direction+4)%4:direction>0?1:0);
+                else {TagSession_ChangeRule(focus-players,direction);editDelta+=direction;}
+                Snd_PlaySe(1,0);
+            }
         }
-        if(pressed&(PADG_CROSS|PADG_START)) {editing=0;Snd_PlaySe(1,1);}
+        if(pressed&(PADG_CROSS|PADG_START)) {editing=0;notice=0;Snd_PlaySe(1,1);}
         if(!(pressed&PADG_START)) return 0;
     }
     if(pressed&PADG_TRIANGLE) { Snd_PlaySe(1,2); return -1; }
@@ -193,10 +297,10 @@ s32 TagSetup_Input(void) {
     if(old!=focus) Snd_PlaySe(1,0);
     if(pressed&(PADG_CROSS|PADG_START)) {
         if(focus==controls_card()+2 && !(pressed&PADG_START)) { Snd_PlaySe(1,2); return -1; }
-        if(focus<controls_card() && !(pressed&PADG_START)) {
+        if((focus<controls_card() || size_team(focus)>=0) && !(pressed&PADG_START)) {
             if(focus<players && ffa()) return 0;
             editing=1;editDelta=0;
-            editOriginal=focus<players?TagSession_PlayerTeam(focus):0;
+            editOriginal=focus<players?TagSession_PlayerTeam(focus):size_team(focus)>=0?TagSession_TeamSize(size_team(focus)):0;
             Snd_PlaySe(1,1); return 0;
         }
         if((focus==controls_card() && players) || (players>1 && Port_TagOption(TAG_OPT_CONTROLLER_CHECK) && !controllers_ready())) {

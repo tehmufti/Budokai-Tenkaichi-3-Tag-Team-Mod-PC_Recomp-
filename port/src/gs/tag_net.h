@@ -19,6 +19,26 @@ static inline void TagNet_CopyFighter(TagNetConfig *c,int to,int from) {
     for(j=0;j<8;j++)c->items[to][j]=c->items[from][j];
     c->lobby.draft.team[to]=c->lobby.draft.team[from];
 }
+/* A lobby's Team Battle with three to five teams: every setup slot carries its team (lobby.draft.team). */
+static inline int TagNet_TeamRoom(const TagNetConfig *c) {
+    return c->party && !c->practice && c->mode==TL_TEAM && c->lobby.draft.teams>=3;
+}
+/* Puts the fighters of such a room where the layout rule wants their teams (TlTeams_Arrange) and sets both
+   row sizes. Returns the new slot of fighter `follow`, or -1 with the room untouched when a team would be
+   empty or hold more than five. The room page and the host share it. */
+static inline int TagNet_ArrangeTeams(TagNetConfig *c,int follow) {
+    TagNetConfig old=*c;int rows[2],order[10],k,n=c->size[0]+c->size[1],to=-1;
+    if(!TlTeams_Arrange(c->lobby.draft.teams,n,old.lobby.draft.team,rows,order))return -1;
+    for(k=0;k<n;k++) {
+        int j,from=order[k];
+        c->chara[k]=old.chara[from];c->costume[k]=old.costume[from];c->owner[k]=old.owner[from];c->cpuLevel[k]=old.cpuLevel[from];
+        for(j=0;j<8;j++)c->items[k][j]=old.items[from][j];
+        c->lobby.draft.team[k]=old.lobby.draft.team[from];
+        if(from==follow)to=k;
+    }
+    c->size[0]=rows[0];c->size[1]=rows[1];
+    return to<0?0:to;
+}
 typedef struct TagNetStatus {
     int phase,role,host,connected,playerMask,ready[TN_PLAYERS],spectators,view,freeCam;
     unsigned frame,rollbacks;
@@ -35,6 +55,8 @@ int TagNet_IsPractice(void);
 int TagNet_Observer(void);
 void TagNet_ChooseMode(int mode);
 void TagNet_ChoosePreset(int mode,int preset);
+/* The host's mode menu: Team Battle with this many teams (2..5). */
+void TagNet_ChooseTeams(int teams);
 int TagNet_HostMenu(void);
 int TagNet_HostPoll(void);
 int TagNet_HostChoosing(void);
@@ -54,6 +76,10 @@ void TagNet_Kick(int member);
 void TagNet_Tournament(unsigned address);
 void TagNet_SkipTournament(void);
 void TagNet_BattleResult(int winningSide);
+/* The match had this many teams (2 unless three to five fought) and this team won (-1: a draw). */
+void TagNet_BattleTeams(int teams,int winningTeam);
+/* Opt-in fixture (BT3_TAG_TEST_TEAM_DIFFER): the setup slot whose team this copy alone changes, or -1. */
+int TagNet_TestTeamDiffer(void);
 void TagNet_PracticeLoadout(int member,unsigned address);
 int TagNet_NativeMenu(void);
 int TagNet_Active(void);

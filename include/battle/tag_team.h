@@ -12,6 +12,15 @@ void TagTeam_Enable(s32 enabled);
 s32 TagTeam_Enabled(void);
 s32 TagTeam_Active(void);
 s32 TagTeam_Count(void);
+/* Teams of the running match: 3..5 in a Team Battle of that many teams, 2 in every other match. */
+s32 TagTeam_TeamCount(void);
+/* The winning team of a decided match of three or more teams (-1: not decided, or a draw). */
+s32 TagTeam_WinningTeam(void);
+/* Whether the running match offers a feature: always in a two-team match, by the table in tag_team.c otherwise. */
+enum { TAG_FEATURE_REVIVE, TAG_FEATURE_TAKEOVER, TAG_FEATURE_FUSION, TAG_FEATURE_ASSIST, TAG_FEATURE_OUTNUMBERED,
+       TAG_FEATURE_COUNT };
+s32 TagTeam_Feature(s32 feature);
+s32 TagTeam_FusionsEnabled(void);
 void TagTeam_Begin(void);
 void TagTeam_End(void);
 void TagTeam_Reset(void);
@@ -59,6 +68,7 @@ void TagTeam_GrabContact(s32 attacker,s32 victim);
 s32 TagTeam_CameraActor(s32 actor);
 s32 TagTeam_ShareClashCamera(s32 actor);
 s32 TagTeam_CinematicPaused(s32 actor);
+s32 TagTeam_Paired(s32 actor);
 /* A held pair owns its reactions until the native grab/rush releases it. */
 s32 TagTeam_CanContact(s32 attacker,s32 victim);
 

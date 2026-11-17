@@ -16,11 +16,21 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 TRACE = re.compile(r"tagteam frame=(\d+) fighter=(\d+) chara=(\d+) team=(\d+) target=(\d+) hp=(-?\d+) action=(\d+)")
+DATA = None
+
+
+def base_env():
+    """The caller's environment without BT3_* settings; --data names the game data folder."""
+    env = dict((k, v) for k, v in os.environ.items() if not k.startswith("BT3_"))
+    env.update(SDL_AUDIO_DRIVER="dummy", BT3_UPDATE_CHECK="0")
+    if DATA:
+        env["BT3_DATA"] = DATA
+    return env
 
 
 def run_case(exe, output, roster):
     name = "baseline-1v1" if roster is None else "v".join(map(str, roster))
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"))
     if roster:
         env.update(BT3_TAG_TEAM="1", BT3_TAG_TRACE="1", BT3_TAG_ROSTER=",".join(map(str, roster)))
@@ -54,6 +64,8 @@ def run_case(exe, output, roster):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", default="port/build/bt3.exe" if os.name == "nt" else "port/build/bt3_64")
+    parser.add_argument("--data", help="Game data folder (BT3_DATA); default: gamedata in the tree")
+    parser.add_argument("--defuse-break", help="With --fusion-only: BT3_TAG_TEST_DEFUSE_BREAK for one P1+P3 case")
     parser.add_argument("--audio-only", action="store_true", help="Only run the real SDL mixer check")
     parser.add_argument("--clash-only", action="store_true", help="Only run native clash participants and interruption checks")
     parser.add_argument("--controls-only", action="store_true", help="Run native lock-off, teammate targeting and takeover checks")
@@ -65,6 +77,8 @@ def main():
     parser.add_argument("--fusion-only", action="store_true", help="Exercise teammate consent, native fusion and timed separation")
     parser.add_argument("--cpu-only", action="store_true", help="Exercise target commitment, retaliation and cinematic guards")
     args = parser.parse_args()
+    global DATA
+    DATA = str(Path(args.data).resolve()) if args.data else None
     exe = Path(args.exe)
     if not exe.is_absolute():
         exe = ROOT / exe
@@ -82,7 +96,10 @@ def main():
         run_assist(exe, output)
         return
     if args.fusion_only:
-        run_fusion(exe, output)
+        if args.defuse_break:
+            run_fusion_case(exe, output, 4, 0, 2, defuse_break=args.defuse_break)
+        else:
+            run_fusion(exe, output)
         return
     if args.cameras_only:
         run_cameras(exe, output)
@@ -106,7 +123,7 @@ def main():
         report = run_case(exe, output, roster)
         reports.append(report)
         print(f"PASS {report['case']} ({report['seconds']}s)", flush=True)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"),
                BT3_TAG_TEAM="1", BT3_TAG_PLAY="4", BT3_TAG_ROSTER="2,2", BT3_TAG_TEST_REVIVE="1")
     log = output / "revival.log"
@@ -128,7 +145,7 @@ def main():
 
 
 def run_cpu(exe, output):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"),
                BT3_TAG_TEAM="1", BT3_TAG_PLAY="1", BT3_TAG_ROSTER="2,2",
                BT3_TAG_TEST_CPU="1", BT3_TAG_CPU_TRACE="1")
@@ -151,8 +168,8 @@ def run_fusion(exe, output):
     return {"case": "fusion", "layouts": len(cases), "potara": True}
 
 
-def run_fusion_case(exe, output, views, a, b, result=53):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+def run_fusion_case(exe, output, views, a, b, result=53, defuse_break=None):
+    env = base_env()
     settings = output / "fusion-settings.txt"
     settings.write_text("tag_extra_intros=0\n", encoding="utf-8")
     env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS=str(settings), BT3_SAVES=str(output / "saves"),
@@ -161,6 +178,10 @@ def run_fusion_case(exe, output, views, a, b, result=53):
                BT3_TAG_FUSION_RESULT=str(result),
                BT3_TAG_TEST_FUSION="1", BT3_TAG_TRACE="1")
     log = output / f"fusion-{views}views-{a+1}-{b+1}-form{result}.log"
+    if defuse_break:
+        # The separation request is broken on purpose; the fusion must still end.
+        env["BT3_TAG_TEST_DEFUSE_BREAK"] = defuse_break
+        log = output / f"fusion-defuse-break-{defuse_break.replace(',', 'x')}.log"
     with log.open("w", encoding="utf-8") as stream:
         process = subprocess.run([str(exe)], cwd=ROOT, env=env, stdout=stream,
                                 stderr=subprocess.STDOUT, timeout=120)
@@ -178,7 +199,7 @@ def run_cameras(exe, output):
 
 
 def run_camera_case(exe, output, backstep):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     settings = output / "camera-settings.txt"
     settings.write_text("", encoding="utf-8")
     env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS=str(settings), BT3_SAVES=str(output / "saves"),
@@ -194,7 +215,7 @@ def run_camera_case(exe, output, backstep):
 
 
 def run_checkin(exe, output):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="gpu", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"),
                BT3_TAG_TEAM="1", BT3_TAG_MENU_TEST="main", BT3_TAG_CHECKIN_TEST="1", BT3_UPDATE_CHECK="0")
     log = output / "checkin.log"
@@ -208,7 +229,7 @@ def run_checkin(exe, output):
 
 
 def run_controls(exe, output):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"),
                BT3_TAG_TEAM="1", BT3_TAG_PLAY="1", BT3_TAG_ROSTER="2,2", BT3_TAG_TEST_CONTROLS="1")
     log = output / "controls.log"
@@ -228,7 +249,7 @@ def run_controls(exe, output):
 
 
 def run_clash(exe, output):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"),
                BT3_TAG_TEAM="1", BT3_TAG_PLAY="4", BT3_TAG_ROSTER="2,2", BT3_TAG_TEST_CLASH="1")
     log = output / "clash.log"
@@ -242,7 +263,7 @@ def run_clash(exe, output):
 
 
 def run_beams(exe, output):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="none", BT3_SOUND="1", SDL_AUDIO_DRIVER="dummy", BT3_PACED="1", BT3_DEMO="1",
                BT3_SETTINGS="", BT3_SAVES=str(output / "saves"), BT3_TAG_TEAM="1", BT3_TAG_PLAY="4",
                BT3_TAG_ROSTER="2,2", BT3_TAG_TEST_BEAMS="1", BT3_TAG_TRACE="1", BT3_TAG_BEAM_TRACE="1")
@@ -275,7 +296,7 @@ def run_beams(exe, output):
 
 
 def run_assist(exe, output):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"),
                BT3_TAG_TEAM="1", BT3_TAG_PLAY="4", BT3_TAG_ROSTER="2,2",
                BT3_TAG_TEST_BEAMS="1", BT3_TAG_TEST_BEAM_ASSIST="1", BT3_TAG_TRACE="1")
@@ -292,7 +313,7 @@ def run_assist(exe, output):
 def run_giants(exe, output):
     # Every native giant body: apes, giant Namekians and Hirudegarn.
     for chara in (12,30,72,74,76,78,81,122,124,139,143):
-        env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+        env = base_env()
         env.update(BT3_GS="none", BT3_DEMO="1", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"),
                    BT3_TAG_TEAM="1", BT3_TAG_PLAY="4", BT3_TAG_ROSTER="2,2",
                    BT3_CHARA=str(chara), BT3_TAG_TEST_GIANTS="1", BT3_TAG_TRACE="1")
@@ -305,7 +326,7 @@ def run_giants(exe, output):
 
 
 def run_audio(exe, output, roster="5,5"):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+    env = base_env()
     env.update(BT3_GS="none", BT3_SOUND="1", SDL_AUDIO_DRIVER="dummy", BT3_SND_VERBOSE="1",
                BT3_DEMO="1", BT3_SETTINGS="", BT3_SAVES=str(output / "saves"),
                BT3_TAG_TEAM="1", BT3_TAG_PLAY="4", BT3_TAG_ROSTER=roster, BT3_TAG_TEST_AUDIO="1")

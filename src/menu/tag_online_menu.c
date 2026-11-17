@@ -3,6 +3,7 @@
 #include "menu/menu_a.h"
 #include "menu/menu_e.h"
 #include "menu/port_screen.h"
+#include "menu/tag_setup.h"
 typedef struct LoadSprite {s32 flags,x0,y0,x1,y1,u0,v0,u1,v1,tex,r,g,b,a;} LoadSprite;
 #include "sys/pad.h"
 #include "../../port/src/gs/tag_net.h"
@@ -133,6 +134,11 @@ static s32 group_option(s32 index) {
     s32 i;for(i=0;i<TN_OPTIONS;i++)if(tagOptionInfo[i].group==group && index--==0)return i;return -1;
 }
 static void select_room(void) {go(ROOM,0);}
+/* Three to five teams: fighters of the room on this slot's team, the slot itself not counted. */
+static s32 team_mates(TagNetConfig *c,s32 team,s32 except) {
+    s32 j,n=0;for(j=0;j<c->size[0]+c->size[1];j++)if(j!=except && c->lobby.draft.team[j]==team)n++;return n;
+}
+static s32 slot_button(TagNetConfig *c,s32 i) {return i<c->size[0]?i:5+i-c->size[0];}
 static void remove_slot(s32 id) {
     TagNetConfig c=room.config;s32 team=id/5,i,k;
     if(!room.host || id<0 || id>=10)return;
@@ -140,6 +146,14 @@ static void remove_slot(s32 id) {
     if(id%5>=c.size[team])return;
     i=(team?c.size[0]:0)+id%5;
     if(c.owner[i]>=0){say("Only CPU slots can be removed. Players can choose Spectate.");return;}
+    if(TagNet_TeamRoom(&c)) {
+        /* The team must keep a fighter; the others close up and stand where the layout puts them. */
+        if(!team_mates(&c,c.lobby.draft.team[i],i)){say("Keep at least one fighter on each team.");return;}
+        for(k=i;k+1<c.size[0]+c.size[1];k++)TagNet_CopyFighter(&c,k,k+1);
+        c.size[i<c.size[0]?0:1]--; /* (only the sum counts: the layout sets both rows again) */
+        if(TagNet_ArrangeTeams(&c,-1)<0)return;
+        commit(&c);k=i<c.size[0]+c.size[1]?i:c.size[0]+c.size[1]-1;focus=slot_button(&c,k);return;
+    }
     if(c.size[team]<=1){say("Keep at least one fighter on each team.");return;}
     for(k=i;k+1<c.size[0]+c.size[1];k++) {
         TagNet_CopyFighter(&c,k,k+1);
@@ -184,7 +198,16 @@ static void activate(s32 id) {
         if(id<10) {
             team=id/5;i=(team?c.size[0]:0)+id%5;
             if(id%5<c.size[team])select_fighter(i);
-            else if(room.host && id%5==c.size[team]) {
+            else if(room.host && id%5==c.size[team] && TagNet_TeamRoom(&c)) {
+                /* Three to five teams: the new CPU joins the team with the fewest fighters (the lower number
+                   when equal); the layout then says where everybody stands. */
+                s32 t,best=0;n=c.size[0]+c.size[1];
+                for(t=1;t<c.lobby.draft.teams;t++)if(team_mates(&c,t,-1)<team_mates(&c,best,-1))best=t;
+                if(n>=10 || team_mates(&c,best,-1)>=5)return;
+                c.chara[n]=0;c.costume[n]=0;c.owner[n]=-1;c.cpuLevel[n]=-1;c.lobby.draft.team[n]=best;memset(c.items[n],0,sizeof(c.items[n]));c.size[1]++;
+                k=TagNet_ArrangeTeams(&c,n);
+                if(k>=0){commit(&c);focus=slot_button(&c,k);}
+            } else if(room.host && id%5==c.size[team]) {
                 for(k=c.size[0]+c.size[1];k>i;k--)TagNet_CopyFighter(&c,k,k-1);
                 c.chara[i]=0;c.costume[i]=0;c.owner[i]=-1;c.cpuLevel[i]=-1;c.lobby.draft.team[i]=team;memset(c.items[i],0,sizeof(c.items[i]));c.size[team]++;commit(&c);
             }
@@ -314,7 +337,22 @@ static void input(void) {
             if(n<5){c.lobby.draft.team[at]=t;commit(&c);}else say("That team already has five fighters.");
         }
     }
-    if(page==ROOM && room.config.party && (room.config.mode==TL_TEAM || room.config.mode==TL_TRAINING) && (p&(PADG_L1|PADG_R1))) {
+    if(page==ROOM && TagNet_TeamRoom(&room.config) && focus>=0 && focus<10 && (p&(PADG_L1|PADG_R1))) {
+        /* Three to five teams: the focused fighter (your own; the host: any CPU) goes to the previous or next
+           team. The host answers with every fighter where the layout puts it, and the cursor follows. */
+        TagNetConfig c=room.config,sent;s32 at=(focus/5?c.size[0]:0)+focus%5,from,t,to;
+        if(focus%5<c.size[focus/5]) {
+            from=c.lobby.draft.team[at];t=Ps_Wrap(from+(p&PADG_L1?-1:1),0,c.lobby.draft.teams-1);
+            if(c.owner[at]!=room.role && !(room.host && c.owner[at]<0))say("This fighter belongs to another player.");
+            else if(team_mates(&c,t,at)>=5)say("That team already has five fighters.");
+            else if(!team_mates(&c,from,at))say("Keep at least one fighter on each team.");
+            else {
+                c.lobby.draft.team[at]=t;sent=c;to=TagNet_ArrangeTeams(&c,at);
+                if(to>=0){commit(room.host?&c:&sent);focus=slot_button(&c,to);}
+            }
+        }
+    }
+    if(page==ROOM && room.config.party && !TagNet_TeamRoom(&room.config) && (room.config.mode==TL_TEAM || room.config.mode==TL_TRAINING) && (p&(PADG_L1|PADG_R1))) {
         s32 at,j,target=-1;for(at=0;at<room.config.size[0]+room.config.size[1];at++)if(room.config.owner[at]==room.role)break;
         if(at<room.config.size[0]+room.config.size[1]) {
             s32 start=at<room.config.size[0]?room.config.size[0]:0,end=at<room.config.size[0]?room.config.size[0]+room.config.size[1]:room.config.size[0];
@@ -348,7 +386,7 @@ static void connection(void) {
     text(319,367,connectRole?"Example  192.168.1.5:7001":"Default port  7001",0.67f,282,3);
 }
 static void lobby(void) {
-    TagNetConfig *c=&room.config;s32 team,j,i,p,readyCount=0;f32 x,y;
+    TagNetConfig *c=&room.config;s32 team,j,i,p,readyCount=0,squad;f32 x,y;
     /* Character arrays avoid mixed-width pointer loads in the native game's
        32-bit data model when selecting a title in a conditional expression. */
     static char titles[][24]={"MODDED DUEL","FREE FOR ALL","MODDED TRAINING","MODDED GAUNTLET","WORLD TOURNAMENT"};
@@ -376,9 +414,10 @@ static void lobby(void) {
         text(256,253,"The host stays in the mode menu.",.78f,460,3);
         button(15,177,345,158,36,"Leave Lobby",1);return;
     }
-    heading(c->party?titles[c->mode]:"ONLINE BATTLE ROOM",c->party?(c->mode==TL_TOURNAMENT?"START - CLAIM / READY    L1 / R1 - CHANGE TEAM":"START - CLAIM A SLOT / READY   TRIANGLE - RELEASE SLOT"):room.host?"YOU ARE HOSTING  /  CHOOSE THE LINEUP AND READY UP":"CHOOSE YOUR FIGHTER AND READY UP");
+    squad=TagNet_TeamRoom(c);
+    heading(c->party?titles[c->mode]:"ONLINE BATTLE ROOM",c->party?(c->mode==TL_TOURNAMENT||squad?"START - CLAIM / READY    L1 / R1 - CHANGE TEAM":"START - CLAIM A SLOT / READY   TRIANGLE - RELEASE SLOT"):room.host?"YOU ARE HOSTING  /  CHOOSE THE LINEUP AND READY UP":"CHOOSE YOUR FIGHTER AND READY UP");
     for(team=0;team<2;team++) {
-        x=18+244*team;Ps_Heading(x+112,76,c->party&&c->mode==TL_GAUNTLET?(team?"NEXT WAVE":"YOUR TEAM"):c->party&&c->mode==TL_FFA?(team?"FIGHTERS 6 - 10":"FIGHTERS 1 - 5"):team?"TEAM 2":"TEAM 1",1.05f,208,128);
+        x=18+244*team;Ps_Heading(x+112,76,c->party&&c->mode==TL_GAUNTLET?(team?"NEXT WAVE":"YOUR TEAM"):c->party&&(c->mode==TL_FFA||squad)?(team?"FIGHTERS 6 - 10":"FIGHTERS 1 - 5"):team?"TEAM 2":"TEAM 1",1.05f,208,128);
         for(j=0;j<5;j++) {
             y=102+j*39;i=(team?c->size[0]:0)+j;
             if(j<c->size[team]) {
@@ -386,6 +425,14 @@ static void lobby(void) {
                 name(0,c->chara[i],label,sizeof(label));left(x+43,y+1,label,0.65f,181,focus==team*5+j?1:0);
                 p=c->owner[i];if(p<0)Ps_Copy(label,"CPU",sizeof(label));else sprintf(label,Port_TagText("P%d%s  -  %s"),p+1,Port_TagText(p==room.role?" (YOU)":""),Port_TagText(room.ready[p]?"READY":"CHOOSING"));
                 if(c->party&&c->mode==TL_TOURNAMENT){char who[60];Ps_Copy(who,label,sizeof(who));sprintf(label,Port_TagText("TEAM %d  -  %s"),c->lobby.draft.team[i]+1,who);}
+                if(squad) {
+                    /* Three to five teams: TEAM n in the team's colour (the colours of the setup page and the HUD), then the owner. */
+                    char mark[32];s32 t=c->lobby.draft.team[i];f32 w;
+                    sprintf(mark,Port_TagText("TEAM %d"),t+1);w=Ps_TextWidth(mark,0.55f)+7;
+                    Ps_Rect(x+3,y+3,x+6,y+33,TagSetup_TeamColor(t,0.3f,128),TagSetup_TeamColor(t,-0.2f,128));
+                    Ps_Align(0);Ps_TextExOuter(x+43,y+18,mark,0.55f,70,TagSetup_TeamColor(t,0.45f,128),TagSetup_TeamColor(t,0,128),Ps_Rgba(0,0,0,128),Ps_Rgba(0,0,0,128),0.8f);Ps_Align(1);
+                    left(x+43+w,y+18,label,0.55f,178-w,p>=0&&room.ready[p]?5:2);
+                } else
                 left(x+43,y+18,label,0.55f,178,p>=0&&room.ready[p]?5:2);
             } else if(j==c->size[team] && !(c->party&&c->mode==TL_GAUNTLET&&team))button(team*5+j,x,y,232,36,room.host?"+ Add CPU":"Open fighter slot",room.host);
         }

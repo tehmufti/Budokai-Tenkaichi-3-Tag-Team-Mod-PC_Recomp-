@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include "battle/tag_capacity.h"
 extern uint64_t SDL_GetTicksNS(void);
 unsigned Port_LoadTimeUs(void) { return (unsigned)(SDL_GetTicksNS()/1000); }
@@ -54,9 +55,58 @@ void Port_TagTeamTrace(int frame, int fighter, int chara, int team, int target, 
     }
 }
 
-void Port_TagTeamFatal(const char *message) {
+/* High-water marks of the capacities whose overrun ends the program: 0 the bytes of one frame's display list,
+   1 the bytes and 2 the blocks held by the effect pools, 3 the file requests in the queue. They describe this
+   run and are not game state (a rollback does not take them back). */
+static int sMarks[4], sMarkLimits[4];
+void Port_TagMark(int kind, int value, int limit) {
+    if ((unsigned)kind < 4 && value > sMarks[kind]) {
+        sMarks[kind] = value;
+        sMarkLimits[kind] = limit;
+    }
+}
+static void marks_text(char *out, size_t size) {
+    snprintf(out, size, "display_list=%d/%d effect_pool_bytes=%d/%d effect_pool_blocks=%d file_requests=%d/%d",
+             sMarks[0], sMarkLimits[0], sMarks[1], sMarkLimits[1], sMarks[2], sMarks[3], sMarkLimits[3]);
+}
+/* End of a battle: BT3_TAG_TRACE logs the marks; the next battle starts from zero. */
+void Port_TagMarksReport(int fighters) {
+    char text[200];
+    if (getenv("BT3_TAG_TRACE")) {
+        marks_text(text, sizeof(text));
+        fprintf(stderr, "tagmarks fighters=%d %s\n", fighters, text);
+    }
+    memset(sMarks, 0, sizeof(sMarks));
+}
+
+/* The native build ends itself: not a fault, so the crash handler never sees it. Write the same file a crash
+   writes (plat_crash.c), with the reason in words, and end. No window: a headless or hidden run must not wait. */
+extern void Port_CrashReport(const char *reason, const char *detail);
+static void fatal(const char *message, const char *numbers) {
+    char marks[200], detail[400];
+    marks_text(marks, sizeof(marks));
+    snprintf(detail, sizeof(detail), "%s%shigh-water marks of this battle: %s", numbers, numbers[0] ? "\n" : "", marks);
     fprintf(stderr, "Native Tag Team stopped: %s\n", message);
+    Port_CrashReport(message, detail);
     exit(2);
+}
+void Port_TagTeamFatal(const char *message) {
+    fatal(message, "");
+}
+/* A capacity check failed: what was asked for, what was in use and the limit go into the report. */
+void Port_TagCapacityFatal(const char *message, int wanted, int used, int limit) {
+    char numbers[120];
+    snprintf(numbers, sizeof(numbers), "wanted %d, in use %d, capacity %d", wanted, used, limit);
+    fatal(message, numbers);
+}
+
+/* A match of three or more teams is decided (BT3_TAG_TRACE). kind 1: one team's sums (team, health, full health,
+   living fighters); kind 0: the decision (time over or knock-out, the winning team or -1 for a draw, the fighter
+   that represents it, the number of teams). */
+void Port_TagDecidedTrace(int kind,int a,int b,int c,int d) {
+    if(!getenv("BT3_TAG_TRACE")) return;
+    if(kind) fprintf(stderr,"tagdecided team=%d health=%d full=%d living=%d\n",a,b,c,d);
+    else fprintf(stderr,"tagdecided reason=%s winner_team=%d actor=%d teams=%d\n",a?"time":"ko",b,c,d);
 }
 
 void Port_TagInputTrace(int actor,int pad,unsigned pressed,int action) {
@@ -121,10 +171,80 @@ int Port_TagFusionPair(int which) {
     return which==0?a:which==1?b:c;
 }
 int Port_TagFusionDouble(void) { return getenv("BT3_TAG_FUSION_DOUBLE")!=NULL; }
+/* BT3_TAG_TEST_DEFUSE_BREAK=<mode>[,<count>]: in the update that requests a timed fusion's power-down, bring
+   another decision too. Mode 1 taps a button on the pad that controls the fused fighter, mode 2 queues another
+   action; count is the number of requests to break (default 1, -1 = every one). */
+int Port_TagDefuseBreak(int which) {
+    int mode=0,count=1;
+    const char *v=getenv("BT3_TAG_TEST_DEFUSE_BREAK");
+    if(v) sscanf(v,"%d,%d",&mode,&count);
+    return which?count:mode;
+}
+/* event: 0 periodic, 1 power-down requested, 2 request lost (back to the timed state), 3 forced, 4 separated. */
+void Port_TagFusionTrace(int tick,int actor,int event,int state,int ticks,int action,int overdue) {
+    if(getenv("BT3_TAG_TRACE") || getenv("BT3_TAG_TEST_DEFUSE_BREAK"))
+        fprintf(stderr,"tagfusion tick=%d actor=%d event=%d state=%d ticks=%d action=%x overdue=%d\n",
+                tick,actor,event,state,ticks,action,overdue);
+}
 int Port_TagFusionKo(void) { return getenv("BT3_TAG_FUSION_KO")!=NULL; }
 int Port_TagFusionRematch(void) { return getenv("BT3_TAG_FUSION_REMATCH")!=NULL; }
 int Port_TagGiantTest(void) { return getenv("BT3_TAG_TEST_GIANTS")!=NULL; }
 int Port_TagCpuTest(void) { return getenv("BT3_TAG_TEST_CPU")!=NULL; }
+/* BT3_TAG_TEST_SQUAD=<case>: 1 what a match of three teams offers, the session and the fallen player's view;
+   2 revive, 3 takeover, 4 fusion, 5 beam assist, 6 Outnumbered, each with the fighters named by
+   BT3_TAG_TEST_SQUAD_ACTORS=a,b,c,d (what they stand for is written at each case in tag_team_test.c). */
+int Port_TagSquadTest(void) { const char *v=getenv("BT3_TAG_TEST_SQUAD"); return v?(atoi(v)>0?atoi(v):1):0; }
+static int list_value(const char *name,int which) {
+    int v[TAG_ACTOR_CAPACITY],n,k=0;
+    const char *s=getenv(name);
+    for(n=0;n<TAG_ACTOR_CAPACITY;n++) v[n]=-1;
+    while(s && *s && k<TAG_ACTOR_CAPACITY) {
+        v[k++]=atoi(s);
+        s=strchr(s,',');
+        if(s) s++;
+    }
+    return (unsigned)which<TAG_ACTOR_CAPACITY?v[which]:-1;
+}
+int Port_TagSquadActor(int which) { return list_value("BT3_TAG_TEST_SQUAD_ACTORS",which); }
+/* BT3_TAG_TEST_SEATS=f,f,...: the fighter each player of a demo match controls (player 1 first). */
+int Port_TagTestSeat(int player) { return list_value("BT3_TAG_TEST_SEATS",player); }
+/* BT3_TAG_TEST_CAST=f:c,f:c,...: the character of single fighters of a demo match (-1: the demo's own). */
+int Port_TagTestCast(int fighter) {
+    const char *s=getenv("BT3_TAG_TEST_CAST");
+    while(s && *s) {
+        int f=-1,c=-1;
+        if(sscanf(s,"%d:%d",&f,&c)==2 && f==fighter) return c;
+        s=strchr(s,',');
+        if(s) s++;
+    }
+    return -1;
+}
+void Port_TagTestNote(int id,int a,int b,int c,int d) {
+    fprintf(stderr,"tagteam fixture note id=%d values=%d,%d,%d,%d\n",id,a,b,c,d);
+}
+/* BT3_TAG_HIT_TRACE: every hit that takes health, with the fighter that owns it and both teams. The counts are
+   read by the fixtures only; they describe this run and are not game state. */
+static int sHits[TAG_ACTOR_CAPACITY][TAG_ACTOR_CAPACITY];
+void Port_TagHitTrace(int victim,int source,int lost,int victimTeam,int sourceTeam) {
+    static int enabled=-1;
+    if(enabled<0) enabled=getenv("BT3_TAG_HIT_TRACE")!=NULL;
+    if(!enabled || lost<=0) return;
+    if((unsigned)victim<TAG_ACTOR_CAPACITY && (unsigned)source<TAG_ACTOR_CAPACITY) sHits[source][victim]++;
+    fprintf(stderr,"taghit victim=%d source=%d lost=%d teams=%d,%d\n",victim,source,lost,victimTeam,sourceTeam);
+}
+int Port_TagHitCount(int source,int victim) {
+    return (unsigned)victim<TAG_ACTOR_CAPACITY && (unsigned)source<TAG_ACTOR_CAPACITY?sHits[source][victim]:0;
+}
+/* BT3_TAG_BALANCE_TRACE: the numbers the Outnumbered help uses for a fighter, whenever they change: its own
+   living team, the enemy count it is compared with, damage dealt and taken in percent. */
+void Port_TagBalanceTrace(int actor,int team,int own,int enemy,int dealt,int taken) {
+    static int enabled=-1,last[TAG_ACTOR_CAPACITY][4];
+    if(enabled<0) enabled=getenv("BT3_TAG_BALANCE_TRACE")!=NULL;
+    if(!enabled || (unsigned)actor>=TAG_ACTOR_CAPACITY) return;
+    if(last[actor][0]==own && last[actor][1]==enemy && last[actor][2]==dealt && last[actor][3]==taken) return;
+    last[actor][0]=own;last[actor][1]=enemy;last[actor][2]=dealt;last[actor][3]=taken;
+    fprintf(stderr,"tagbalance actor=%d team=%d own=%d enemy=%d dealt=%d taken=%d\n",actor,team,own,enemy,dealt,taken);
+}
 int Port_TagStageTest(void) { const char *v=getenv("BT3_TAG_TEST_STAGE"); return v?atoi(v):0; }
 int Port_TagSpawnTest(void) { return getenv("BT3_TAG_TEST_SPAWN")!=NULL; }
 void Port_TagSpawnFailure(int stage,int actor,int grounded,int clearBody) {

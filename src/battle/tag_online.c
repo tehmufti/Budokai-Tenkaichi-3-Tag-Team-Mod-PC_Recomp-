@@ -42,12 +42,34 @@ void TagOnline_SaveScope(s32 enter) {
 }
 void TagOnline_Seed(void) {
     TagNetConfig c;unsigned seed[4];s32 i;TagNet_CopyConfig((u32)&c);
+    /* The game has a third generator, the vector unit's shift register behind
+       Rand_Float01 (effects, the launch of stage debris). It is rolled back
+       with the rest, but every copy must also start a session from the same
+       value: a host that came from its menu and guests that came from practice
+       launched the same debris differently, and its splashes then drew
+       differently from the generator the copies compare. */
+    {extern unsigned gPortVu0R;unsigned low=(unsigned)c.seed&0x007FFFFFu;gPortVu0R=0x3F800000u|(low?low:1u);}
     Port_Srand((unsigned)c.seed);for(i=0;i<4;i++)seed[i]=Port_Rand();Rand_SeedByArray(seed,4);
 }
 void Port_TagOnlineSetup(void) {
     TagNetConfig c;s32 i,t,m,actor=0;BattleItemSet items;
     TagNet_CopyConfig((u32)&c);TagSession_Leave();TagLobby_LeavePractice();
     if(c.party && !c.practice){TagSession_Setup(c.mode,0);TagSession_Commit();}
+    if(TagNet_TeamRoom(&c)) {
+        /* Three to five teams: the room's slot teams are the session's table
+           (row 0 first); from here on the match is the offline one. The room
+           rule every PC applied (TlTeams_Valid) only lets a laid-out table
+           through, so a refusal here means two teams on every copy alike. */
+        s8 table[10];s32 differ=TagNet_TestTeamDiffer();
+        memset(table,-1,sizeof(table));
+        for(t=0;t<2;t++)for(m=0;m<c.size[t];m++)table[t*5+m]=(s8)c.lobby.draft.team[(t?c.size[0]:0)+m];
+        /* (opt-in fixture: this copy alone puts one fighter on the next team) */
+        if(differ>=0 && differ<c.size[0]+c.size[1]) {
+            s32 at=differ<c.size[0]?differ:5+differ-c.size[0];
+            table[at]=(s8)((table[at]+1)%c.lobby.draft.teams);
+        }
+        TagSession_SetRoomTeams(c.lobby.draft.teams,table);
+    }
     if(c.party && c.practice)TagLobby_EnterPractice(&c.lobby);
     {extern void TagOnline_TestReset(void);TagOnline_TestReset();}
     Save_SetDefaults(gSaveData);Save_UnlockAll(gSaveData);
@@ -82,17 +104,20 @@ void Port_TagOnlineSetup(void) {
 }
 void TagOnline_ReportResult(void) {
     s32 flags=BattleResult_GetFlags();TagNet_BattleResult((flags&3)==1?0:(flags&3)==2?1:-1);
+    /* Three to five teams: the room says which team won (-1: nobody). */
+    TagNet_BattleTeams(TagTeam_TeamCount(),TagTeam_TeamCount()>=3?TagTeam_WinningTeam():-1);
 }
 /* Pointer-free, fixed-width semantic checks for every fighter, not only the
    two original slots. Local camera/HUD/audio preferences do not participate. */
 unsigned long long TagOnline_Digest(void) {
     struct Actor {
         s32 chara,costume,hp,maxHp,ki,blast,action,target,player,off,clash;
-        s32 fused,controller,next,seconds,swap,revive,helper,assist,power;
+        s32 fused,controller,next,seconds,swap,revive,helper,assist,power,team;
         Vec4 pos,rot;
     } a;
     unsigned long long h=14695981039346656037ull;unsigned char *p;s32 i,j;
-    s32 header[4]={TagTeam_Count(),gBtlSeq?gBtlSeq->state:0,gBtlSeq?BtlSeq_GetClock()->ticks:0,0};
+    s32 header[6]={TagTeam_Count(),gBtlSeq?gBtlSeq->state:0,gBtlSeq?BtlSeq_GetClock()->ticks:0,0,
+                   TagTeam_TeamCount(),TagTeam_WinningTeam()};
     extern void TagNet_Audit(s32,u32,u32);
     TagNet_Audit(-1,(u32)header,sizeof(header));
     p=(unsigned char *)header;for(j=0;j<sizeof(header);j++)h=(h^p[j])*1099511628211ull;
@@ -105,6 +130,7 @@ unsigned long long TagOnline_Digest(void) {
         a.clash=BtlClash_Opponent(i);a.fused=TagFusion_SharedBody(i);a.controller=TagFusion_Controller(i);
         a.next=TagFusion_NextController(i);a.seconds=TagFusion_Seconds(i);a.swap=TagFusion_SwitchSeconds(i);
         a.revive=TagRevive_Progress(i);a.helper=TagRevive_Helper(i);a.assist=TagAssist_Ally(i);a.power=TagAssist_Multiplier(i);
+        a.team=TagTeam_Team(i);
         a.pos=((BtlMovePose *)&chr->pose)->pos;a.rot=((BtlMovePose *)&chr->pose)->rot;
         TagNet_Audit(i,(u32)&a,sizeof(a));
         p=(unsigned char *)&a;for(j=0;j<sizeof(a);j++)h=(h^p[j])*1099511628211ull;

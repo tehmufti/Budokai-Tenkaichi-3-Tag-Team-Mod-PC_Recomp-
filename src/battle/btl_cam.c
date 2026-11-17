@@ -833,6 +833,9 @@ static View *onlineSavedMatrix;
 static s32 onlineSavedActor,onlineSavedSingle,onlineDrawing,onlineActor;
 static unsigned long long onlineSavedRandom;
 extern unsigned long long gPortRandNext;
+/* (the vector unit's generator as well: what a copy draws must not move what it simulates) */
+static unsigned onlineSavedFloatRandom;
+extern unsigned gPortVu0R;
 extern s32 BtlScene_IsSingleView(void);
 extern void BtlScene_SetSingleView(s32);
 s32 TagOnline_PresentationActor(s32 fallback) { return onlineDrawing?onlineActor:fallback; }
@@ -850,7 +853,7 @@ s32 TagOnline_BeginDraw(void) {
         actor=0;
 found:  actor=TagFusion_Owner(actor);
     }
-    onlineActor=actor;onlineSavedRandom=gPortRandNext;
+    onlineActor=actor;onlineSavedRandom=gPortRandNext;onlineSavedFloatRandom=gPortVu0R;
     onlineSavedView=nativeViews[0];onlineSavedCurrent=gBtlCam->cur;onlineSavedMatrix=gBtlCamView;
     onlineSavedActor=nativeSharedActor;onlineSavedSingle=gBtlScene->singleView;onlineDrawing=1;
     /* One local viewport does not mean a shared cinematic. IsSingleView also
@@ -883,6 +886,6 @@ void TagOnline_EndDraw(void) {
     if(!onlineDrawing)return;
     nativeViews[0]=onlineSavedView;gBtlCam->cur=onlineSavedCurrent;gBtlCamView=onlineSavedMatrix;
     nativeSharedActor=onlineSavedActor;BtlScene_SetSingleView(onlineSavedSingle);View_Apply(gBtlCamView,0);onlineDrawing=0;
-    gPortRandNext=onlineSavedRandom;
+    gPortRandNext=onlineSavedRandom;gPortVu0R=onlineSavedFloatRandom;
 }
 #endif

@@ -28,6 +28,13 @@ extern s32 TagRevive_Progress(s32),TagRevive_Helper(s32);
 static s32 tick,fused,switched,revived,complete,inputChecked,inputTicks;
 void TagOnline_TestReset(void) {tick=fused=switched=revived=complete=inputChecked=inputTicks=0;}
 void TagOnline_TestDone(void) {complete=1;}
+/* Opt-in report fixture (BT3_TAG_TEST_DIFFER): this copy alone takes a little health from one fighter. */
+void TagOnline_TestDiffer(s32 actor) {
+    BtlMgrGauge *g;
+    if(!TagTeam_Active() || actor<0 || actor>=TagTeam_Count())return;
+    g=BtlMember_GetActiveGauge(BtlChar_Get(actor));
+    if(g->health>100)g->health-=100;
+}
 void TagOnline_TestPrepare(void) {
     s32 i;
     if(!TagNet_TestCase() || !TagTeam_Active())return;

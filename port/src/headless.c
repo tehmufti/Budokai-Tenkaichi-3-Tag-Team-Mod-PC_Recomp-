@@ -332,6 +332,50 @@ int Port_NetMenuListed(void) {
    BT3_HASH logs as the fight's own without the generator: both fighters' health and position, the sequence's
    state and the battle clock. (Not the whole state: each copy shows its own view, and two systems' programs keep
    other addresses in the game's memory.) */
+/* BT3_TAG_TEAMS=<a>,<b>,<c>[,<d>[,<e>]]: the CPU demo is a Team Battle of three to five teams with that many
+   fighters each (one to five, ten in all at most); BT3_TAG_ROSTER is not read then. index -1: the number of teams
+   (0 without the switch); 0..4: a team's size; 5: BT3_TAG_TEAMS_TIME, the time-limit setting for it (0 none,
+   1..4 = 60 / 90 / 180 / 240 seconds; -1 without it: the demo's own short limit); 6: BT3_TAG_TEAMS_HEALTH,
+   the percentage of its health every fighter starts with (-1 without it: all of it). */
+int Port_TagTeamsTest(int index) {
+    static int count = -1, size[5], limit = -1, health = -1;
+    if (count < 0) {
+        const char *v = getenv("BT3_TAG_TEAMS"), *t = getenv("BT3_TAG_TEAMS_TIME"), *h = getenv("BT3_TAG_TEAMS_HEALTH");
+        int total = 0, bad = 0, k;
+        count = v != NULL ? sscanf(v, "%d,%d,%d,%d,%d", &size[0], &size[1], &size[2], &size[3], &size[4]) : 0;
+        for (k = 0; k < count; k++) {
+            bad |= size[k] < 1 || size[k] > 5;
+            total += size[k];
+        }
+        if (v != NULL && (count < 3 || bad || total > 10)) {
+            fprintf(stderr, "Native Tag Team: use BT3_TAG_TEAMS=A,B,C[,D[,E]]: three to five teams of one to five fighters, ten in all at most\n");
+            exit(2);
+        }
+        if (t != NULL) {
+            limit = atoi(t);
+        }
+        if (h != NULL) {
+            health = atoi(h);
+        }
+    }
+    return index < 0 ? count : index < 5 ? (index < count ? size[index] : 0) : index == 5 ? limit : health;
+}
+
+/* BT3_TAG_TEST_OVERRUN=<kind>: the named capacity check (1 display list, 2 effect pools, 3 file request queue)
+   fails once on purpose, to prove the report: ten seconds into the fight for 1, at the first allocation or
+   request after the battle was set up for 2 and 3. */
+int Port_TagOverrunTest(int kind) {
+    static int wanted = -1;
+    if (wanted < 0) {
+        const char *v = getenv("BT3_TAG_TEST_OVERRUN");
+        wanted = v != NULL ? atoi(v) : 0;
+    }
+    if (wanted != kind || (sBattles == 0 && !sFromMenu)) {
+        return 0;
+    }
+    return kind != 1 || (gBtlSeq != NULL && gBtlSeq->state == 3 && BtlSeq_GetClock()[0] >= 300);
+}
+
 unsigned long long Port_NetDigest(void) {
     if(TagNet_Enabled()) {extern unsigned long long TagOnline_Digest(void);return TagOnline_Digest();}
     struct { unsigned arrived; int mode, first, battle, seq, clock, hp[2]; unsigned pos[2][3]; } d;

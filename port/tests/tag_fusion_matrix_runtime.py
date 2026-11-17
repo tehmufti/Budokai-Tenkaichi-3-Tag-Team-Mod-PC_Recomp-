@@ -20,7 +20,12 @@ CASES=[
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--case",action="append")
+    p.add_argument("--exe",default="port/build/bt3.exe" if os.name=="nt" else "port/build/bt3_64")
+    p.add_argument("--data",help="Game data folder (BT3_DATA); default: gamedata in the tree")
+    p.add_argument("--defuse-break",help="BT3_TAG_TEST_DEFUSE_BREAK for every case run")
     args=p.parse_args()
+    exe=Path(args.exe)
+    if not exe.is_absolute():exe=ROOT/exe
     out=ROOT/"port/build/tag-fusion-matrix";out.mkdir(parents=True,exist_ok=True)
     settings=out/"settings.txt";settings.write_text("tag_extra_intros=0\n")
     passed=[]
@@ -31,13 +36,16 @@ def main():
                    BT3_SAVES=str(out/"saves"),BT3_TAG_TEAM="1",BT3_TAG_PLAY=str(players),
                    BT3_TAG_VIEWS="4",BT3_TAG_ROSTER="3,2" if ko else "2,2",
                    BT3_TAG_TEST_FUSION="2",BT3_TAG_FUSION_PAIR=f"{a},{b},{costume}",
-                   BT3_TAG_FUSION_RESULT=str(result),BT3_TAG_TRACE="1",SDL_AUDIO_DRIVER="dummy")
+                   BT3_TAG_FUSION_RESULT=str(result),BT3_TAG_TRACE="1",SDL_AUDIO_DRIVER="dummy",
+                   BT3_UPDATE_CHECK="0")
+        if args.data:env["BT3_DATA"]=str(Path(args.data).resolve())
+        if args.defuse_break:env["BT3_TAG_TEST_DEFUSE_BREAK"]=args.defuse_break
         if double:env["BT3_TAG_FUSION_DOUBLE"]="1"
         if ko:env["BT3_TAG_FUSION_KO"]="1"
         if name=="fused-rematch":env["BT3_TAG_FUSION_REMATCH"]="1"
-        log=out/f"{name}.log"
+        log=out/(f"{name}-break-{args.defuse_break.replace(',','x')}.log" if args.defuse_break else f"{name}.log")
         with log.open("w") as f:
-            r=subprocess.run([str(ROOT/"port/build/bt3.exe")],cwd=ROOT,env=env,
+            r=subprocess.run([str(exe)],cwd=ROOT,env=env,
                              stdout=f,stderr=subprocess.STDOUT,timeout=120)
         text=log.read_text(errors="replace")
         assert r.returncode==0 and "PASS check=99" in text,log

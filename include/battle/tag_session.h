@@ -29,5 +29,13 @@ s32 TagSession_CpuLevel(s32 side,s32 member);
 void TagSession_ChangeRule(s32 rule,s32 direction);
 const char *TagSession_RuleLabel(s32 rule);
 s32 TagSession_Commit(void);
+/* Team Battle with three to five teams (tag_session.c; two after every TagSession_Leave). */
+s32 TagSession_Teams(void);
+void TagSession_SetTeams(s32 teams);
+s32 TagSession_TeamSize(s32 team);
+s32 TagSession_SetTeamSize(s32 team,s32 size);
+s32 TagSession_ChangeTeamSize(s32 team,s32 direction);
+s32 TagSession_SlotTeam(s32 row,s32 member);
+s32 TagSession_SetRoomTeams(s32 teams,const s8 *slotTeams);
 void TagMenu_Request(s32 page);
 #endif

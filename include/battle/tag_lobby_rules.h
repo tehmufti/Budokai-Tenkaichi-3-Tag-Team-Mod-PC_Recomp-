@@ -1,5 +1,6 @@
 #ifndef TAG_LOBBY_RULES_H
 #define TAG_LOBBY_RULES_H
+#include "tag_squad.h"
 
 /* Persistent room rules, independent of sockets, presentation and game heaps.
  * Stable member IDs never change when another member leaves. The practice
@@ -81,6 +82,39 @@ static inline int TlTournament_Advance(TlTournament *t,int side) {
     if(match<4){if(match&1)t->right[4+match/2]=winner;else t->left[4+match/2]=winner;}
     else if(match<6){if(match==4)t->left[6]=winner;else t->right[6]=winner;}
     t->match++;if(t->match==7)t->active=2;return TL_OK;
+}
+
+/* Team Battle rooms. team[i]: the team of setup slot i; the first `first`
+ * slots stand on roster row 0, the others on row 1 (one to five each).
+ * Two teams: the team is the row. Three to five teams: every team holds one
+ * to five fighters and the slots stand exactly where TagSquad_Layout puts
+ * those team sizes, so every PC hands the match the same table and the
+ * match is the offline one. The host, every guest and the unit test share
+ * this rule. */
+static inline int TlTeams_Valid(int teams,int count,int first,const int *team) {
+    int size[TAG_SQUAD_TEAMS]={0},rows[2],i;signed char slot[2][TAG_SQUAD_ROW];
+    if(teams<2 || teams>TAG_SQUAD_TEAMS || first<1 || first>TAG_SQUAD_ROW || count-first<1 || count-first>TAG_SQUAD_ROW)return 0;
+    if(teams==2){for(i=0;i<count;i++)if(team[i]!=(i>=first))return 0;return 1;}
+    for(i=0;i<count;i++){if(team[i]<0 || team[i]>=teams)return 0;size[team[i]]++;}
+    if(!TagSquad_Layout(teams,size,rows,slot) || rows[0]!=first)return 0;
+    for(i=0;i<count;i++)if(slot[i>=first][i<first?i:i-first]!=team[i])return 0;
+    return 1;
+}
+/* The slots in the order that rule wants: order[k] is the slot that moves
+ * to place k (the fighters of a team keep their order), rows[] the two row
+ * sizes. Returns 0, changing nothing, when a team would be empty or hold
+ * more than five. */
+static inline int TlTeams_Arrange(int teams,int count,const int *team,int rows[2],int order[10]) {
+    int size[TAG_SQUAD_TEAMS]={0},next[TAG_SQUAD_TEAMS]={0},r[2],i,k=0,row,m;signed char slot[2][TAG_SQUAD_ROW];
+    if(teams<2 || teams>TAG_SQUAD_TEAMS || count<2 || count>TAG_SQUAD_FIGHTERS)return 0;
+    for(i=0;i<count;i++){if(team[i]<0 || team[i]>=teams)return 0;size[team[i]]++;}
+    if(!TagSquad_Layout(teams,size,r,slot))return 0;
+    for(row=0;row<2;row++)for(m=0;m<r[row];m++) {
+        int t=slot[row][m];
+        for(i=next[t];team[i]!=t;i++){}
+        order[k++]=i;next[t]=i+1;
+    }
+    rows[0]=r[0];rows[1]=r[1];return 1;
 }
 
 

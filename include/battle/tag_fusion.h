@@ -16,4 +16,6 @@ s32 TagFusion_Controller(s32 actor);
 s32 TagFusion_NextController(s32 actor);
 s32 TagFusion_SwitchSeconds(s32 actor);
 s32 TagFusion_Requester(s32 actor);
+s32 TagFusion_PendingAction(s32 actor);
+s32 TagFusion_PairMax(s32 actor);
 #endif

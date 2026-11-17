@@ -104,6 +104,8 @@ static s32 score(s32 actor,s32 candidate,s32 opening) {
 }
 void TagCpu_Update(void) {
     s32 actor;
+    /* Everyone opening on the first enemy by number suits two teams only. */
+    s32 spread=TagSession_Mode()==TAG_MODE_FREE_FOR_ALL || TagTeam_TeamCount()>=3;
     if(!TagTeam_Active() || !BtlSeq_IsFighting() ||
        (Battle_GetWork()->flags&(BATTLE_FLAG_PAUSE|BATTLE_FLAG_LOADING)))return;
     ++tick;
@@ -119,7 +121,7 @@ void TagCpu_Update(void) {
         }
         if(!safe(actor))continue;
         if(living(current)&&TagTeam_IsEnemy(actor,current)) {
-            if(opening && TagSession_Mode()!=TAG_MODE_FREE_FOR_ALL) best=current;
+            if(opening && !spread) best=current;
             else if(d->ready) {
                 s32 threat=0;
                 if(tick-d->changed<60 || tick<d->evaluate)continue;
@@ -131,7 +133,7 @@ void TagCpu_Update(void) {
             }
         }
         if(best<0) for(candidate=0;candidate<TagTeam_Count();candidate++) if(living(candidate)&&TagTeam_IsEnemy(actor,candidate)) {
-            s32 value=score(actor,candidate,opening&&TagSession_Mode()==TAG_MODE_FREE_FOR_ALL);
+            s32 value=score(actor,candidate,opening&&spread);
             if(value>bestScore){bestScore=value;best=candidate;}
         }
         if(best<0)continue;

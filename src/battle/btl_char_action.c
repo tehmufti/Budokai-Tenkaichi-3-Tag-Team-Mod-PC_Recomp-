@@ -1174,6 +1174,12 @@ void BtlAct_Update(BtlActChr *chr) {
         s32 pending=TagAssist_PendingAction(chr->player);
         if(pending>=0) BtlAct_Request(chr,pending);
     }
+    {
+        /* A timed fusion ten seconds overdue (tag_fusion.c). */
+        extern s32 TagFusion_PendingAction(s32);
+        s32 pending=TagFusion_PendingAction(chr->player);
+        if(pending>=0) BtlAct_Request(chr,pending);
+    }
     BtlAct_CheckForced(chr);
 #ifdef PORT
     /* The original duel ends immediately on ring-out. A team fight can keep

@@ -17,6 +17,8 @@ enum {
     TAG_LABEL_PRESETS = TAG_LABEL_OPTIONS + TAG_OPT_COUNT,
     TAG_LABEL_TOURS = TAG_LABEL_PRESETS + 26,
     TAG_LABEL_PREV = TAG_LABEL_TOURS + 5, TAG_LABEL_NEXT,
+    /* "2 Teams" .. "5 Teams" of the teams page. Appended: nothing above moved. */
+    TAG_LABEL_TEAMS, TAG_LABEL_TEAMS_LAST = TAG_LABEL_TEAMS + 3,
     TAG_LABEL_COUNT
 };
 #endif

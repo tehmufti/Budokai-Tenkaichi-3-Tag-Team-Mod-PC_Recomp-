@@ -21,7 +21,29 @@ extern BtlMgrChr *BtlChar_Get(s32);
 static Vec4 placed[TAG_TEAM_CAPACITY];
 static s32 ready;
 static f32 practiceFacing;
-void TagSpawn_Reset(void) {ready=0;}
+/* Three or more teams: stg_a_b.c searches every fighter's start place once
+   per round and keeps it here. Later callers (a switch-in, a separation
+   without room, the spawn fixture) get the places of the round's start,
+   whatever has been destroyed around them since. */
+static Vec4 squadPlaced[TAG_TEAM_CAPACITY];
+static f32 squadFacing[TAG_TEAM_CAPACITY];
+static s32 squadReady;
+void TagSpawn_Reset(void) {ready=0;squadReady=0;}
+s32 TagSpawn_SquadCanKeep(void) {
+    /* As for the free-for-all plan: collision traces are skipped while
+       loading, and such unchecked places must not be kept. */
+    return BtlStage_IsReady() && !(Battle_GetWork()->flags&BATTLE_FLAG_LOADING);
+}
+s32 TagSpawn_SquadStart(s32 actor,Vec4 *pos,Vec4 *rot) {
+    if(!squadReady || (u32)actor>=(u32)TagTeam_Count()) return 0;
+    *pos=squadPlaced[actor];rot->y=squadFacing[actor];
+    return 1;
+}
+void TagSpawn_SquadKeep(s32 actor,Vec4 *pos,f32 facing,s32 last) {
+    if((u32)actor>=TAG_TEAM_CAPACITY) return;
+    squadPlaced[actor]=*pos;squadFacing[actor]=facing;
+    if(last) squadReady=1;
+}
 
 /* Leave room to move and turn the follow camera, not merely enough room for
    the standing collision cylinder. Score the tightest surrounding wall. */

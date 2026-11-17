@@ -29,6 +29,7 @@ typedef struct TagHudView {
 } TagHudView;
 typedef struct TagHudState {
     int active, count, views, shared, shown, paused, timeLeft, frame;
+    int teamCount, winnerTeam; /* 3..5 teams: a colour each; the winner once the match is decided, else -1 */
     int reviveEnabled, reviveDuration, reviveCost;
     TagHudActor actors[TAG_HUD_MAX];
     TagHudView view[TAG_HUD_MAX];

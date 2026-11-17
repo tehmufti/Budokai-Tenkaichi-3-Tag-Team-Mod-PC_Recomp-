@@ -32,6 +32,7 @@ static s32 value(s32 option) {
     return Port_TagOption(option);
 }
 static s32 live(s32 i) {return TagTeam_IsAlive(i)&&!TagFusion_Hidden(i);}
+static s32 enabled(void) {return Port_TagOption(TAG_OPT_OUTNUMBERED) && TagTeam_Feature(TAG_FEATURE_OUTNUMBERED);}
 static s32 paired(s32 i) {
     BtlMgrChr *c=BtlChar_Get(i);
     return (c->action>=183&&c->action<=188) || BtlClash_Opponent(i)>=0 ||
@@ -40,7 +41,7 @@ static s32 paired(s32 i) {
 void TagBalance_Reset(void) {memset(rows,0,sizeof(rows));}
 void TagBalance_Update(void) {
     s32 i,j;
-    if(!TagTeam_Active() || !BtlSeq_IsFighting() || !Port_TagOption(TAG_OPT_OUTNUMBERED)) {
+    if(!TagTeam_Active() || !BtlSeq_IsFighting() || !enabled()) {
         if(TagTeam_Active()) for(i=0;i<TagTeam_Count();i++) {
             BtlMgrChr *c=BtlChar_Get(i);
             /* Leave a longer protection timer from the base game alone. */
@@ -60,6 +61,16 @@ void TagBalance_Update(void) {
             if(TagTeam_IsEnemy(i,j)) {enemy++;if(TagTeam_Target(j)==i) attackers++;}
             else own++;
         }
+        if(TagTeam_TeamCount()>=3) {
+            /* Several enemy teams do not fight as one: a team is
+               outnumbered by the largest of them, not by their sum. */
+            s32 size[TAG_TEAM_CAPACITY]={0};
+            enemy=0;
+            for(j=0;j<TagTeam_Count();j++) if(live(j) && TagTeam_IsEnemy(i,j)) {
+                s32 t=TagTeam_Team(j);
+                if((u32)t<TAG_TEAM_CAPACITY && ++size[t]>enemy) enemy=size[t];
+            }
+        }
         small=TagSession_Mode()!=TAG_MODE_FREE_FOR_ALL && own>0 && own<enemy;
         b->helped=(small || (Port_TagOption(TAG_OPT_OUT_SCOPE)&&attackers>=2)) &&
             (!Port_TagOption(TAG_OPT_OUT_HUMANS)||TagTeam_InputPlayer(i)>=0);
@@ -69,6 +80,8 @@ void TagBalance_Update(void) {
             if(b->dealt>300)b->dealt=300;
             if(b->taken<40)b->taken=40;
         }
+        { extern void Port_TagBalanceTrace(s32,s32,s32,s32,s32,s32);
+          Port_TagBalanceTrace(i,TagTeam_Team(i),own,enemy,b->dealt,b->taken); }
         if(BtlChar_IsFrozen(c)||TagTeam_CinematicPaused(i)) continue;
         if(b->protect)b->protect--;
         if(b->cooldown)b->cooldown--;
@@ -87,7 +100,7 @@ void TagBalance_Update(void) {
 }
 s32 TagBalance_Modify(s32 victim,s32 source,s32 damage,s32 flags) {
     Balance *b;
-    if(!TagTeam_Active() || !Port_TagOption(TAG_OPT_OUTNUMBERED) ||
+    if(!TagTeam_Active() || !enabled() ||
        (u32)victim>=(u32)TagTeam_Count() || damage<=0 || (flags&1)) return damage;
     if((u32)source>=(u32)TagTeam_Count() || !TagTeam_IsEnemy(victim,source)) return damage;
     b=&rows[victim];
@@ -98,14 +111,16 @@ s32 TagBalance_Modify(s32 victim,s32 source,s32 damage,s32 flags) {
 }
 s32 TagBalance_Damage(void *victim,s32 damage,s32 flags,s32 source) {
     extern void TagCpu_Damage(s32,s32,s32);
+    extern void Port_TagHitTrace(s32,s32,s32,s32,s32);
     s32 lost=BtlMember_Damage(victim,TagBalance_Modify(*(s32 *)victim,source,damage,flags),flags);
+    if(TagTeam_Active()) Port_TagHitTrace(*(s32 *)victim,source,lost,TagTeam_Team(*(s32 *)victim),TagTeam_Team(source));
     TagCpu_Damage(*(s32 *)victim,source,lost);
     return lost;
 }
 f32 TagBalance_Recovery(s32 actor) {
     s32 action;
     if(!TagTeam_Active() || (u32)actor>=(u32)TagTeam_Count() ||
-       !Port_TagOption(TAG_OPT_OUTNUMBERED) || !rows[actor].helped || paired(actor)) return 1;
+       !enabled() || !rows[actor].helped || paired(actor)) return 1;
     action=BtlChar_Get(actor)->action;
     if(action==189 || (action>=192&&action<=230)) return (f32)value(TAG_OPT_OUT_RECOVERY)/100.0f;
     return 1;

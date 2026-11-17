@@ -15,6 +15,7 @@
 #include "battle/tag_options.h"
 #include "menu/tag_outfit.h"
 #include "menu/port_screen.h"
+#include "menu/tag_setup.h"
 #include "../../port/src/gs/tag_net.h"
 static TsTeam tagRemembered[2];
 static s32 tagRememberedCount[2], tagSelector, tagSelectionCommitted;
@@ -43,6 +44,14 @@ static void TeamSel_DrawCpuPrompt(void) {
         Ps_Text(256,y+j*35+5,CpuLevel_SettingName(j),0.85f,190,lit?1:0);
     }
     Ps_PromptsClear();Ps_Prompt(0,"Confirm");Ps_Prompt(2,"Back");Ps_PromptsDraw();
+}
+/* Menu tests: what is written above a slot of the character select (0: nothing), once per change. */
+static void slot_trace(s32 side,s32 member,s32 mark,s32 a,s32 b) {
+    extern void Port_TagMenuTrace(s32,s32,s32,s32,s32,s32);
+    static s32 marks[2][5];
+    if(marks[side][member]==mark) return;
+    marks[side][member]=mark;
+    Port_TagMenuTrace(41,side,member,mark,a,b);
 }
 void TeamSel_ResetTagRoster(void) {
     memset(tagRemembered,0,sizeof(tagRemembered));
@@ -2442,10 +2451,24 @@ s32 TeamSel_Run(s32 section) {
         if (!(gProgress->flags & MPROG_FREEZE)) {
             TeamSel_Update();
         }
+#ifdef PORT
+        if(TagSession_Selected() && TagSession_Teams()>=3) {
+            /* Three to five teams: a row holds the fighters planned for it; its other slots are not shown. */
+            char slotName[32];
+            s32 row,slot;
+            MFlashRef unused;
+            for(row=0;row<2;row++) for(slot=TagSession_Size(row);slot<TS_MEMBER_MAX;slot++) {
+                sprintf(slotName,"mc_team_%d",slot);
+                Flash_FindLabel(&gTeamSel->flash[row+1],NULL,slotName,&unused);
+                Flash_ClipSetFlags(&gTeamSel->flash[row+1],&unused,2,0);
+            }
+        }
+#endif
         TeamSel_Draw();
 #ifdef PORT
         TeamSel_DrawCpuPrompt();
-        if(TagSession_Selected() && Port_TagOption(TAG_OPT_SLOT_LABELS) && !(gTeamSel->flags&TEAMSEL_STAGE)) {
+        /* (with three to five teams the markers say which slot is which team: they are not an option) */
+        if(TagSession_Selected() && (Port_TagOption(TAG_OPT_SLOT_LABELS) || TagSession_Teams()>=3) && !(gTeamSel->flags&TEAMSEL_STAGE)) {
             extern void Flash_ClipGetPos(MFlash *,MFlashRef *,s32 *,s32 *);
             extern f32 Flash_ClipGetAlpha(MFlash *,MFlashRef *);
             char parent[32],label[32],name[32];
@@ -2461,12 +2484,35 @@ s32 TeamSel_Run(s32 section) {
                 owner=TagSession_Owner(side,member);
                 if(owner<0) Ps_Copy(label,"CPU",sizeof(label));
                 else sprintf(label,"P%d",owner+1);
+                if(TagSession_Teams()>=3) {
+                    /* Three to five teams: the slot's team and owner in the team's colour, above the slot. The
+                       plate's position is the one inside its slot; the slot's place on the row is added (while
+                       the row is away the slot is transparent and nothing is written). */
+                    s32 team=TagSession_SlotTeam(side,member),sx=0,sy=0;
+                    MFlashRef slot;
+                    Flash_FindLabel(&gTeamSel->flash[side+1],NULL,parent,&slot);
+                    if(slot.id<0 || Flash_ClipGetAlpha(&gTeamSel->flash[side+1],&slot)<0.4f) {slot_trace(side,member,0,0,0);continue;}
+                    Flash_ClipGetPos(&gTeamSel->flash[side+1],&slot,&sx,&sy);
+                    sprintf(name,Port_TagText("T%d %s"),team+1,label);
+                    Ps_TextExOuter(x+sx+31,y+sy-15,name,0.6f,60,TagSetup_TeamColor(team,0.3f,128),
+                        TagSetup_TeamColor(team,0,128),Ps_Rgba(0,0,0,128),Ps_Rgba(0,0,0,128),0.8f);
+                    slot_trace(side,member,1+(owner+1)+10*(team+1),x+sx+31,y+sy-15);
+                } else
                 Ps_Text(x+24,y-17,label,0.65f,48,owner<0?0:3);
             }
             if(TagSession_Mode()==TAG_MODE_TOURNAMENT)sprintf(label,Port_TagText("TEAM %d - PLAYER %d"),TagTournament_DraftTeam()+1,tagSelector+1);
             else sprintf(label,Port_TagText("PLAYER %d SELECTING"),tagSelector+1);
             Ps_TextExOuter(402,5,label,0.65f,202,Ps_Rgba(208,252,255,128),
                 Ps_Rgba(112,224,255,128),Ps_Rgba(0,0,0,128),Ps_Rgba(0,0,0,128),0.8f);
+            if(TagSession_Teams()>=3 && gTeamSel->side[gTeamSel->base]->state!=TEAMSEL_ST_DONE &&
+               gTeamSel->side[gTeamSel->base]->memberCount<TagSession_MinSize(gTeamSel->base)) {
+                /* End is refused until the row holds the fighters planned for it. */
+                char hint[96];
+                s32 need=TagSession_MinSize(gTeamSel->base);
+                sprintf(hint,Port_TagText(need==1?"Pick 1 fighter on this row.":"Pick %d fighters on this row."),need);
+                Ps_TextExOuter(402,19,hint,0.55f,202,Ps_Rgba(255,236,184,128),
+                    Ps_Rgba(255,148,48,128),Ps_Rgba(0,0,0,128),Ps_Rgba(0,0,0,128),0.8f);
+            }
         }
 #endif
         Font_FlushAll();

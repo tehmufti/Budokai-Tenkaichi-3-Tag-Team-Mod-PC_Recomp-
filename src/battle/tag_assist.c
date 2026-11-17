@@ -168,7 +168,7 @@ static s32 available(s32 actor) {
 s32 TagAssist_ReadyAlly(s32 actor) {
     s32 i,best=-1;f32 reach=Port_TagOption(TAG_OPT_BEAM_ASSIST_RANGE),nearest=reach*reach;
     Vec4 p;
-    if(!TagTeam_Active() || !Port_TagOption(TAG_OPT_BEAM_ASSIST) ||
+    if(!TagTeam_Active() || !Port_TagOption(TAG_OPT_BEAM_ASSIST) || !TagTeam_Feature(TAG_FEATURE_ASSIST) ||
        TagAssist_Active(actor) || !available(actor)) return -1;
     p=((BtlMovePose *)&BtlChar_Get(actor)->pose)->pos;
     for(i=0;i<TagTeam_Count();i++) if(i!=actor && !TagTeam_IsEnemy(actor,i) &&
@@ -248,7 +248,7 @@ void TagAssist_Update(void) {
             continue;
         }
         if(a->state) {
-            if(!Port_TagOption(TAG_OPT_BEAM_ASSIST) || !TagTeam_IsAlive(i) ||
+            if(!Port_TagOption(TAG_OPT_BEAM_ASSIST) || !TagTeam_Feature(TAG_FEATURE_ASSIST) || !TagTeam_IsAlive(i) ||
                !TagTeam_IsAlive(a->ally) || !EftStruggle_IsActiveFor(a->ally) ||
                BtlClash_Opponent(a->ally)!=a->enemy || g->health<a->hp ||
                (a->state==3 && c->action!=0x130) ||

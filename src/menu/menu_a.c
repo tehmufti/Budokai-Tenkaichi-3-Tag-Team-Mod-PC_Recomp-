@@ -50,6 +50,16 @@ void MainMenu_PlateGoto(s32 idx,char *label);
 static s32 tagPage, tagMode, presetPage, settingsPage;
 #define TAG_SETTINGS_ROWS (MAINMENU_ITEM_MAX-3)
 #define TAG_MENU_PRESET 100
+/* "How many teams?", after Team Battle. Its id is above the settings pages
+   (5 and up) like the presets page's, and like that one it is taken out by
+   hand wherever a page of 4 or 5 and more means settings. */
+#define TAG_MENU_TEAMS 101
+static s32 tagTeams=2;
+/* Its rows: "2 Teams" to "5 Teams", then Back. A lobby host's mode menu
+   opens the same page; TAG_ONLINE_TEAM_ROWS 1 would leave a host with
+   "2 Teams" alone. */
+#define TAG_ONLINE_TEAM_ROWS 4
+static s32 teams_rows(void) {return TagNet_HostMenu()?TAG_ONLINE_TEAM_ROWS:4;}
 static s32 preset_count(void) {return tagMode==TAG_MODE_GAUNTLET?TagChallenge_Count():5;}
 static s32 preset_rows(void) {s32 n=preset_count()-presetPage*8;return n>8?8:n;}
 static s32 stockItems[MAINMENU_ITEM_MAX], stockCount, stockTop, stockCursor;
@@ -81,6 +91,7 @@ static s32 TagMenu_Option(s32 page,s32 row) {
 static s32 TagMenu_Count(s32 page) {
     s32 n=0;
     if(page==TAG_MENU_PRESET) return preset_rows()+3;
+    if(page==TAG_MENU_TEAMS) return teams_rows()+1;
     if(page==3) return 1; /* spatial setup page draws its own roster */
     if(page==2) return 6;
     if(page==1) return TagNet_HostMenu()?7:8;
@@ -94,6 +105,7 @@ static s32 TagMenu_Label(s32 page,s32 row) {
             row==n?TAG_LABEL_PREV:row==n+1?TAG_LABEL_NEXT:4;
     }
     if(page==1) {static const s32 labels[]={0,1,2,TAG_LABEL_GAUNTLET,TAG_LABEL_TOURNAMENT,TAG_LABEL_LOBBY,3,4};return TagNet_HostMenu() && row==6?TAG_LABEL_CLOSE_LOBBY:labels[TagNet_HostMenu() && row>=5?row+1:row];}
+    if(page==TAG_MENU_TEAMS) return row<teams_rows()?TAG_LABEL_TEAMS+row:4;
     if(page==3) return TAG_LABEL_CHOOSE;
     if(page==2 && row>=4) return row==4?TAG_LABEL_CPU:4;
     if(page>=4) {
@@ -114,7 +126,7 @@ static void TagMenu_SettingChange(s32 row,s32 direction) {
 void TagMenu_Request(s32 page) { tagPage=page; }
 static s32 tag_icon(s32 item) {
     static const s32 icons[6]={3,3,6,9,4,4};
-    return tagPage>=4 ? 9 : tagPage==3 ? 3 : tagPage ? icons[item%6] : item==MAINMENU_TBO?4:item;
+    return tagPage==TAG_MENU_TEAMS ? 3 : tagPage>=4 ? 9 : tagPage==3 ? 3 : tagPage ? icons[item%6] : item==MAINMENU_TBO?4:item;
 }
 #define MM_ICON(item) tag_icon(item)
 
@@ -191,6 +203,15 @@ static void TagMenu_SetPage(s32 page) {
     Voice_Stop(0); gMainMenu->voiceLine=-1;
     gMainMenu->flags=(gMainMenu->flags&~MAINMENU_STARTED)|MAINMENU_GREETED;
 }
+/* The teams page ends here. Offline the count waits for the Players page
+   (TagSession_Setup starts every session with two teams); a lobby host's
+   mode menu hands it to the room, which brings the guests to its setup page
+   (the menu waits on this page meanwhile, as the presets page does). */
+static void TagMenu_TeamsChosen(s32 teams) {
+    if(TagNet_HostMenu()) { TagNet_ChooseTeams(teams); return; }
+    tagTeams=teams;
+    TagMenu_SetPage(2);
+}
 static void TagMenu_Prepare(void) {
     extern s32 Port_MainTagLabel(s32,s32,s32,s32);
     s32 lit,row,x,y,ok=1;
@@ -218,11 +239,12 @@ static void TagMenu_Guide(void) {
     s32 row=MAINMENU_CUR(gMainMenu);
     char value[96],heading[64];
     if(tagPage==TAG_MENU_PRESET) Ps_Copy(heading,tagMode==TAG_MODE_GAUNTLET?"CHOOSE GAUNTLET":"CHOOSE TOURNAMENT",sizeof(heading));
+    else if(tagPage==TAG_MENU_TEAMS) Ps_Copy(heading,"TEAMS",sizeof(heading));
     else if(tagPage>=5) Ps_Copy(heading,tagOptionGroups[tagPage-5],sizeof(heading));
     else Ps_Copy(heading,tagPage==4?"MOD SETTINGS":tagPage==3?"BATTLE SETUP":tagPage==2?"PLAYERS":"MODDED MODES",sizeof(heading));
     Ps_Heading(390,14,heading,0.75f,225,128);
     Ps_Rect(10,342,502,414,Ps_Rgba(12,49,65,115),Ps_Rgba(12,49,65,115));
-    if(tagPage!=TAG_MENU_PRESET && tagPage>=5 && row<TagMenu_Rows(tagPage)) {
+    if(tagPage!=TAG_MENU_PRESET && tagPage!=TAG_MENU_TEAMS && tagPage>=5 && row<TagMenu_Rows(tagPage)) {
         s32 id=TagMenu_Option(tagPage,row),v=Port_TagOption(id);
         { extern void Port_TagOptionValue(s32,u32,s32),Port_TagPreview(s32),Hud_LoadTagPreview(void);
           Hud_LoadTagPreview();
@@ -234,6 +256,10 @@ static void TagMenu_Guide(void) {
         char message[128];
         Ps_Copy(message,descriptions[7],sizeof(message));
         if(tagPage==TAG_MENU_PRESET) {sprintf(message,Port_TagText("Choose a challenge. Page %d of %d."),presetPage+1,(preset_count()+7)/8);}
+        else if(tagPage==TAG_MENU_TEAMS) {
+            if(!row) Ps_Copy(message,"Two teams, as always. Choose the fighters of each side.",sizeof(message));
+            else if(row<teams_rows()) sprintf(message,Port_TagText("%d teams fight at the same time. The last team standing wins."),row+2);
+        }
         else if(tagPage==1 && (u32)row<7) Ps_Copy(message,TagNet_HostMenu() && row==6?"Close the online lobby and disconnect its guests.":descriptions[TagNet_HostMenu() && row==5?6:row],sizeof(message));
         else if(tagPage==2 && row!=5) Ps_Copy(message,row==4?
             "Choose both rosters and watch the battle. L3 changes the fighter you follow.":
@@ -716,7 +742,7 @@ void MainMenu_Input(s32 *result) {
         if(action>0) { Snd_PlaySe(1,1); MAINMENU_CHOOSE(40); }
         return;
     }
-    if(tagPage!=TAG_MENU_PRESET && tagPage>=5 && (gPad[0].gameRepeat&(PADG_LEFT|PADG_RIGHT))) {
+    if(tagPage!=TAG_MENU_PRESET && tagPage!=TAG_MENU_TEAMS && tagPage>=5 && (gPad[0].gameRepeat&(PADG_LEFT|PADG_RIGHT))) {
         TagMenu_SettingChange(MAINMENU_CUR(gMainMenu),(gPad[0].gameRepeat&PADG_LEFT)?-1:1); return;
     }
 #endif
@@ -782,6 +808,9 @@ void MainMenu_Input(s32 *result) {
                     else TagMenu_SetPage(3);
                 } else if(item==n+2) TagMenu_SetPage(TagNet_HostMenu()?1:2);
                 else {presetPage=(presetPage+(item==n?-1:1)+pages)%pages;TagMenu_SetPage(TAG_MENU_PRESET);}
+            } else if(tagPage==TAG_MENU_TEAMS) {
+                if(item<teams_rows()) TagMenu_TeamsChosen(item+2);
+                else TagMenu_SetPage(1);
             } else if(tagPage>=4 && TagMenu_Total(tagPage)>=MAINMENU_ITEM_MAX &&
                       item>=TagMenu_Rows(tagPage) && item<TagMenu_Count(tagPage)-1) {
                 s32 pages=(TagMenu_Total(tagPage)+TAG_SETTINGS_ROWS-1)/TAG_SETTINGS_ROWS;
@@ -792,14 +821,16 @@ void MainMenu_Input(s32 *result) {
                 else TagMenu_SettingChange(item,1);
             } else if(tagPage==4) TagMenu_SetPage(item==TagMenu_Count(tagPage)-1?1:5+item+settingsPage*TAG_SETTINGS_ROWS);
             else if(tagPage==1 && TagNet_HostMenu()) {
-                if(item<3)TagNet_ChoosePreset(item,0);
+                if(item==TAG_MODE_TEAM){tagMode=item;TagMenu_SetPage(TAG_MENU_TEAMS);}
+                else if(item<3)TagNet_ChoosePreset(item,0);
                 else if(item<5){tagMode=item;presetPage=0;TagMenu_SetPage(TAG_MENU_PRESET);}
                 else if(item==5)TagMenu_SetPage(4);
                 else TagNet_Leave();
             }
-            else if(item==TagMenu_Count(tagPage)-1) TagMenu_SetPage(tagPage==2?1:0);
+            else if(item==TagMenu_Count(tagPage)-1) TagMenu_SetPage(tagPage==2?(tagMode==TAG_MODE_TEAM?TAG_MENU_TEAMS:1):0);
             else if(tagPage==2) {
                 TagSession_Setup(tagMode,item==4?0:item+1);
+                if(tagMode==TAG_MODE_TEAM && tagTeams>=3) TagSession_SetTeams(tagTeams);
                 presetPage=0;TagMenu_SetPage(tagMode==TAG_MODE_GAUNTLET || tagMode==TAG_MODE_TOURNAMENT?TAG_MENU_PRESET:3);
             } else if(item==3 || item==4) {
                 tagMode=item==3?TAG_MODE_GAUNTLET:TAG_MODE_TOURNAMENT;TagMenu_SetPage(2);
@@ -809,7 +840,7 @@ void MainMenu_Input(s32 *result) {
                 MainMenu_PlateGoto(0,"fl_ok");
             } else if(item==6) {
                 TagMenu_SetPage(4);
-            } else { tagMode=item; TagMenu_SetPage(2); }
+            } else { tagMode=item; TagMenu_SetPage(item==TAG_MODE_TEAM?TAG_MENU_TEAMS:2); }
             Snd_PlaySe(1,1); return;
         }
 #endif
@@ -876,7 +907,7 @@ void MainMenu_Input(s32 *result) {
     } else if (gPad[0].gamePressed & 0x400) {
 #ifdef PORT
         if(tagPage==1 && TagNet_HostMenu()){Snd_PlaySe(1,2);return;}
-        if(tagPage) { TagMenu_SetPage(tagPage==TAG_MENU_PRESET?(TagNet_HostMenu()?1:2):tagPage>=5?4:tagPage==4?1:tagPage==3?2:tagPage==2?1:0); Snd_PlaySe(1,2); return; }
+        if(tagPage) { TagMenu_SetPage(tagPage==TAG_MENU_PRESET?(TagNet_HostMenu()?1:2):tagPage==TAG_MENU_TEAMS?1:tagPage>=5?4:tagPage==4?1:tagPage==3?2:tagPage==2?(tagMode==TAG_MODE_TEAM?TAG_MENU_TEAMS:1):0); Snd_PlaySe(1,2); return; }
 #endif
         Flash_GotoLabel(&gMainMenu->flash[0], "fl_cancel", 1);
         IconWin_Close();

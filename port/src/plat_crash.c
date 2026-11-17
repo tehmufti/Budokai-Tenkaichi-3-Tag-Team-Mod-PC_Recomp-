@@ -117,6 +117,45 @@ static LONG WINAPI on_crash(EXCEPTION_POINTERS *e) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+/* A stop the program decides itself (a capacity of the native build was exceeded, tagteam_trace.c): the same file
+   and the same layout as a crash, with the reason in words. Nothing here waits for anybody; the caller ends the
+   program. */
+void Port_CrashReport(const char *reason, const char *detail) {
+    static LONG once;
+    void *frames[32];
+    USHORT n, i;
+
+    if (InterlockedExchange(&once, 1) != 0) {
+        return;
+    }
+    sCrashOut[0] = GetStdHandle(STD_ERROR_HANDLE);
+    sCrashOut[1] = CreateFileA("bt3_crash.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    crash_put("bt3: stopped: ");
+    crash_put(reason);
+    if (detail != NULL && detail[0] != '\0') {
+        crash_put("\r\n");
+        crash_put(detail);
+    }
+    crash_put("\r\nlast step reached: ");
+    crash_put(gPortStage);
+    if (Port_DataSummary()[0] != '\0') {
+        crash_put("\r\n");
+        crash_put(Port_DataSummary());
+    }
+    crash_put("\r\nbacktrace (innermost first; addresses in Tenkaichi3Decomp.exe are looked up in the build's map file):\r\n");
+    n = RtlCaptureStackBackTrace(0, 32, frames, NULL);
+    for (i = 0; i < n; i++) {
+        crash_hex((unsigned long long)(uintptr_t)frames[i]);
+        crash_where(frames[i]);
+        crash_put("\r\n");
+    }
+    crash_put("bt3: the same report is in bt3_crash.txt\r\n");
+    if (sCrashOut[1] != INVALID_HANDLE_VALUE) {
+        CloseHandle(sCrashOut[1]);
+        sCrashOut[1] = NULL;
+    }
+}
+
 /* (priority 101: before the other start-up code of the port, which reads the game data and reserves memory) */
 __attribute__((constructor(101))) static void crash_init(void) {
     /* The program is a window program (no console window of its own). Started from a terminal, its messages go
@@ -213,6 +252,44 @@ static void on_crash(int sig) {
     }
     signal(sig, SIG_DFL);
     raise(sig);
+}
+
+/* A stop the program decides itself (tagteam_trace.c): the reason in words, to the terminal and to the file a
+   crash writes. The text is complete before the backtrace is taken. */
+void Port_CrashReport(const char *reason, const char *detail) {
+    void *frames[48];
+    int fd = open("bt3_crash.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644), k, n;
+
+    for (k = 0; k < 2; k++) {
+        int out = k == 0 ? 2 : fd;
+        if (out < 0) {
+            continue;
+        }
+        put(out, "bt3: stopped: ");
+        put(out, reason);
+        if (detail != NULL && detail[0] != '\0') {
+            put(out, "\n");
+            put(out, detail);
+        }
+        if (Port_DataSummary()[0] != '\0') {
+            put(out, "\n");
+            put(out, Port_DataSummary());
+        }
+        put(out, "\n");
+    }
+    n = backtrace(frames, 48);
+    for (k = 0; k < 2; k++) {
+        int out = k == 0 ? 2 : fd;
+        if (out < 0) {
+            continue;
+        }
+        put(out, "backtrace (innermost first):\n");
+        backtrace_symbols_fd(frames, n, out);
+    }
+    if (fd >= 0) {
+        close(fd);
+        put(2, "bt3: the same report is in bt3_crash.txt\n");
+    }
 }
 
 #ifdef __APPLE__

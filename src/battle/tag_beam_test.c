@@ -27,6 +27,8 @@ extern s32 Port_TagShowcaseDelay(void);
 extern s32 TagNet_Active(void);
 extern EftHSlot *EftShot_GetSlot(s32,s32);
 static s32 showcaseTick,showcaseActive,showcaseHelpers;
+/* For the fixtures of other files: a fighter's count in a beam struggle. */
+void TagBeam_TestClashCount(s32 actor,s32 value) { ((BtlFlagChr *)BtlChar_Get(actor))->clashCountA=value; }
 
 /* The extended photo takes hold an even struggle for an orbit. This is only
  * enabled by the capture environment; ordinary matches keep native timing. */

@@ -853,15 +853,25 @@ s32 BtlStage_GetStartPlace(s32 side, Vec4 *pos, Vec4 *rot, s32 alt) {
         f32 water=0;
         s32 hasWater=!alt && BtlStage_GetWaterLevel(&water);
         s32 a,b,ring,k,found=0;
+        /* Three or more teams: a base per team (tag_position.c) instead
+           of the two authored starts, and one search per round for all
+           fighters (tag_spawn.c keeps the places). */
+        s32 squads=alt?2:TagTeam_TeamCount();
+        s32 keep=squads>=3 && TagSpawn_SquadCanKeep();
+        s32 last=keep?TagTeam_Count()-1:side;
+        Vec4 centre=starts[0].pos;
+        if(squads>=3 && TagSpawn_SquadStart(side,pos,rot)) return BtlStage_FindZoneNear(-1,pos);
         for(a=0;a<TagTeam_Count();a++) {
             s32 obj=BattleSide_GetObjId(a);
             body[a]=obj>=0?BtlCharApi_GetRadius(obj):15.0f;
             if(body[a]<10.0f) body[a]=10.0f;
             if(body[a]*2.0f+12.0f>gap) gap=body[a]*2.0f+12.0f;
         }
-        for(a=0;a<=side;a++) {
+        for(a=0;a<=last;a++) {
             StgPlace *base=alt?d->altStarts:&starts[TagTeam_NativeSide(a)];
+            Vec4 origin=base->pos;
             f32 radius=0.0f,samples=0.0f;
+            if(squads>=3) TagPosition_SquadBase(&starts[0].pos,&starts[1].pos,TagTeam_Team(a),squads,gap,&origin,&centre);
             found=0;
             fallbackHeight+=gap;
             for(ring=0;ring<24 && !found;ring++,radius+=gap,samples+=8.0f) {
@@ -870,8 +880,8 @@ s32 BtlStage_GetStartPlace(s32 side, Vec4 *pos, Vec4 *rot, s32 alt) {
                 extern f32 sinf(f32),cosf(f32);
                 Vec4 test;
                 s32 clear=1;
-                test.x=base->pos.x+cosf(angle)*radius;
-                test.z=base->pos.z+sinf(angle)*radius;
+                test.x=origin.x+cosf(angle)*radius;
+                test.z=origin.z+sinf(angle)*radius;
                 test.y=BtlStage_GetTop()+1.0f; test.w=1.0f;
                 if(test.x*test.x+test.z*test.z>(limit-body[a])*(limit-body[a])) continue;
                 for(b=0;b<a;b++) {
@@ -911,13 +921,16 @@ s32 BtlStage_GetStartPlace(s32 side, Vec4 *pos, Vec4 *rot, s32 alt) {
             if(!found) {
                 /* Extremely constrained stages: separate vertically above the
                    original safe point rather than stacking bodies on it. */
-                placed[a]=base->pos;
+                placed[a]=origin;
                 placed[a].y-=fallbackHeight;
                 if(hasWater && placed[a].y>water-gap) placed[a].y=water-gap;
                 if(placed[a].y<BtlStage_GetTop()+gap) placed[a].y=BtlStage_GetTop()+gap;
             }
         }
+        if(keep) for(a=0;a<=last;a++)
+            TagSpawn_SquadKeep(a,&placed[a],Stg_CalcYaw(placed[a].x,placed[a].z,centre.x,centre.z),a==last);
         *pos=placed[side];
+        if(squads>=3) rot->y=Stg_CalcYaw(pos->x,pos->z,centre.x,centre.z);
         return BtlStage_FindZoneNear(-1,pos);
     }
     zone = BtlStage_ProbeGround(-1, pos, &hit);

@@ -8,7 +8,7 @@ Fight together with up to ten fighters on the field at once. This native version
 brings Tag Team battles to [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp),
 with BT3 and BT4 support, local split-screen, and direct online rooms.
 
-Download the [latest release](https://github.com/tehmufti/Budokai-Tenkaichi-3-Tag-Team-Mod-PC_Recomp-/releases/tag/v0.1.0-beta.5) for Windows or Linux.
+Download the [latest release](https://github.com/tehmufti/Budokai-Tenkaichi-3-Tag-Team-Mod-PC_Recomp-/releases/tag/v0.1.0-beta.6) for Windows or Linux.
 This beta runs without PCSX2. Setup imports the game data from your own supported `.iso`;
 no game disc or save data is included in the download.
 
@@ -16,6 +16,8 @@ no game disc or save data is included in the download.
 
 - Team battles, Free For All, Modded Training, Gauntlet and World Tournament,
   reached through **Select → Modded Modes** in the game's main menu.
+- Team Battle with two to five teams fighting at once, offline and in the
+  Online Lobby: ten fighters in all, the last team standing wins.
 - Up to five fighters per team, uneven teams, CPU-only matches, and individual
   CPU difficulty. Character, outfit and equipment selection use the original menus.
 - Two-, three- and four-player split-screen with the game's health and ki panels.

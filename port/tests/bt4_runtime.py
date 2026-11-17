@@ -38,6 +38,8 @@ def main():
     parser.add_argument('--character',type=int,action='append')
     parser.add_argument('--stage',type=int,action='append')
     parser.add_argument('--mechanic',action='append')
+    parser.add_argument('--fusion',action='append',help='With --case fusions: only this pair (name)')
+    parser.add_argument('--defuse-break',help='With --case fusions: BT3_TAG_TEST_DEFUSE_BREAK')
     parser.add_argument('--frames',type=int,default=1800)
     parser.add_argument('--output',type=Path,help='Separate results directory for this run')
     parser.add_argument('--jobs',type=int,choices=range(1,5),default=1)
@@ -137,12 +139,14 @@ def main():
         pairs=[('kefla',118,198,104),('kefla-ss2',198,135,154),('zamasu',34,157,76),
                ('gogeta',3,31,85),('super-gogeta',31,3,53),('vegito',31,3,51),
                ('gotenks',46,44,48),('gotenks-ss3',45,47,50),('ss4-gogeta',10,38,54)]
+        extra={'BT3_TAG_TEST_DEFUSE_BREAK':args.defuse_break} if args.defuse_break else {}
         for name,a,b,fused in pairs:
+            if args.fusion and name not in args.fusion:continue
             for players in (1,4):
                 battle(f'{name}-{players}p',dict(BT3_TAG_TEAM='1',BT3_TAG_PLAY=str(players),
                     BT3_TAG_VIEWS='4',BT3_TAG_ROSTER='2,2',BT3_TAG_TEST_FUSION='2',
                     BT3_TAG_FUSION_PAIR=f'{a},{b},0',BT3_TAG_FUSION_RESULT=str(fused),
-                    BT3_TAG_TRACE='1'),'PASS check=99')
+                    BT3_TAG_TRACE='1')|extra,'PASS check=99')
     raise SystemExit(0 if results and all(r['passed'] for r in results) else 1)
 
 

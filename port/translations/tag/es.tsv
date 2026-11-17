@@ -811,3 +811,50 @@ Off, hold the target button and flick, or flick alone. Locked off, the stick sti
 Include defeated fighters when the target button switches the spectator camera.	Incluye a los luchadores derrotados al cambiar de cámara con el botón de objetivo.
 Choose targeting and menu buttons here. F1 > Controls binds those buttons to keys or gamepad inputs for each player. Controller Setup assigns devices to players. Target and lock-off buttons replace their normal battle actions.	Elige aquí los botones de objetivo y menú. F1 > Controles asigna teclas o botones del mando para cada jugador. Configurar mandos asigna los dispositivos. Los botones de objetivo y desbloqueo sustituyen a sus acciones normales en combate.
 Controls	Controles
+Player %d left.	El jugador %d se fue.
+Player %d was removed by the host.	El anfitrión expulsó al jugador %d.
+Player %d stopped responding.	El jugador %d dejó de responder.
+Player %d could not finish loading.	El jugador %d no pudo terminar de cargar.
+Player %d's connection could not keep up.	La conexión del jugador %d no dio abasto.
+Lost the connection to Player %d.	Se perdió la conexión con el jugador %d.
+Player %d stopped sending inputs.	El jugador %d dejó de enviar sus controles.
+Their fighter is now a CPU.	Su luchador pasa a ser CPU.
+The match has stopped.	El combate se ha detenido.
+The host left. The room is closed.	El anfitrión se fue. La sala está cerrada.
+The host stopped responding. The room is closed.	El anfitrión dejó de responder. La sala está cerrada.
+Lost the connection to the host. The room is closed.	Se perdió la conexión con el anfitrión. La sala está cerrada.
+The host removed you from the lobby.	El anfitrión te expulsó de la sala.
+Your game stopped responding, so the host removed you. Join again for the next match.	Tu juego dejó de responder y el anfitrión te expulsó. Vuelve a unirte para el próximo combate.
+Your game took too long to load, so the match started without you. Join again for the next match.	Tu juego tardó demasiado en cargar y el combate empezó sin ti. Vuelve a unirte para el próximo combate.
+Your connection could not keep up, so the host removed you. Join again for the next match.	Tu conexión no dio abasto y el anfitrión te expulsó. Vuelve a unirte para el próximo combate.
+Your connection to the host could not keep up. The room is closed.	Tu conexión con el anfitrión no dio abasto. La sala está cerrada.
+The match did not start in time. The room is closed.	El combate no empezó a tiempo. La sala está cerrada.
+A player did not return from the match. The room is closed.	Un jugador no volvió del combate. La sala está cerrada.
+The host did not close the match. The room is closed.	El anfitrión no cerró el combate. La sala está cerrada.
+Inputs stopped arriving. The match has stopped.	Dejaron de llegar los controles. El combate se ha detenido.
+You left the room.	Saliste de la sala.
+The games went out of sync. Match stopped.	Los juegos se desincronizaron. El combate se ha detenido.
+A report was saved: %s%s	Se guardó un informe: %s%s
+Waiting for %s...	Esperando a %s...
+the other players	los demás jugadores
+Hold Start to leave the room.	Mantén Start para salir de la sala.
+P%d	J%d
+TEAM %d WINS	GANA EL EQUIPO %d
+2 Teams	2 equipos
+3 Teams	3 equipos
+4 Teams	4 equipos
+5 Teams	5 equipos
+Two teams, as always. Choose the fighters of each side.	Dos equipos, como siempre. Elige los luchadores de cada lado.
+%d teams fight at the same time. The last team standing wins.	%d equipos luchan a la vez. Gana el último equipo en pie.
+TEAM %d	EQUIPO %d
+%d FIGHTERS	%d LUCHADORES
+1 FIGHTER	1 LUCHADOR
+Fighters per team: up to 10 in total. Players take the first fighters of their team.	Hasta 10 luchadores en total. Los jugadores usan los primeros de su equipo.
+10 fighters at most: lower another team first.	Máximo 10 luchadores: reduce antes otro equipo.
+Team %d has no fighter left for another player.	Al equipo %d no le quedan luchadores para otro jugador.
+Team %d needs a fighter for each of its players.	El equipo %d necesita un luchador por cada jugador.
+Pick %d fighters on this row.	Elige %d luchadores en esta fila.
+Pick 1 fighter on this row.	Elige 1 luchador en esta fila.
+T%d %s	E%d %s
+Team %d won.	Ganó el equipo %d.
+The match ended in a draw.	El combate terminó en empate.
